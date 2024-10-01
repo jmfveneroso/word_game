@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Word Neighbor Explorer</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      .word-container {
+        margin-bottom: 20px;
+      }
+      .neighbor {
+        cursor: pointer;
+        color: blue;
+        text-decoration: underline;
+      }
+      .win-message {
+        color: green;
+        font-size: 1.5em;
+        margin-top: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Word Neighbor Explorer</h1>
+    <div id="wordContainer" class="word-container">
+      <h2 id="mainWord"></h2>
+      <p>Neighbors:</p>
+      <ul id="neighborList"></ul>
+      <p>Target Word: <strong id="targetWord"></strong></p>
+      <div id="winMessage" class="win-message" style="display: none">
+        Congratulations! You've reached the target word!
+      </div>
+    </div>
+
+    <script>
+      let targetWord = ""; // Store the target word globally
+      let distancesDict = ""; // Store the distances to the target word
+      let displayHopDistance = true;
+      const wordDict = undefined;
+
+      // Function to perform BFS and calculate hop distance from the target word to all other words
+      function calculateHopDistances(targetWord, dictionary) {
+        const distances = {}; // Dictionary to store distances
+        const queue = [targetWord]; // Queue for BFS
+        distances[targetWord] = 0; // Distance to the target word is 0
+
+        while (queue.length > 0) {
+          const currentWord = queue.shift(); // Get the first word from the queue
+          const currentDistance = distances[currentWord]; // Get the current distance
+
+          // Get all the neighbors of the current word
+          const neighbors = dictionary[currentWord];
+
+          neighbors.forEach((neighborObj) => {
+            const neighborWord = neighborObj.neighbor;
+
+            // If the neighbor has not been visited (no distance calculated yet)
+            if (!(neighborWord in distances)) {
+              distances[neighborWord] = currentDistance + 1; // Set the distance
+              queue.push(neighborWord); // Add the neighbor to the queue for further exploration
+            }
+          });
+        }
+
+        return distances; // Return the dictionary with hop distances
+      }
+
+      function parseBase64File(base64String) {
+        const decodedString = atob(base64String);
+        const lines = decodedString.split("\n");
+
+        const wordList = [];
+        lines.forEach((line) => {
+          if (line.trim() !== "") {
+            const [word] = line.split("|", 1);
+            wordList.push(word);
+          }
+        });
+
+        let display = true;
+
+        const wordDictionary = {};
+        lines.forEach((line) => {
+          if (line.trim() === "") return; // Skip empty lines
+
+          const indexOfFirstPipe = line.indexOf("|");
+          const word = line.slice(0, indexOfFirstPipe);
+          const neighborsStr = line.slice(indexOfFirstPipe + 1);
+
+          if (display) {
+            display = false;
+          }
+
+          const neighbors = neighborsStr.split("|").map((neighbor) => {
+            const [index, distance] = neighbor.split(":");
+            return {
+              neighbor: wordList[parseInt(index, 10)], // Get the actual word by index
+              distance: parseFloat(distance), // Distance (as float)
+            };
+          });
+
+          wordDictionary[word] = neighbors;
+        });
+        return wordDictionary;
+      }
+
+      // Function to get random words that aren't in the current neighbor list
+      function getRandomWords(currentWord, dictionary, excludeWords, count) {
+        const allWords = Object.keys(dictionary);
+        const randomWords = [];
+        while (randomWords.length < count) {
+          const randomWord = allWords[Math.floor(Math.random() * allWords.length)];
+          if (
+            randomWord !== currentWord &&
+            !excludeWords.includes(randomWord) &&
+            !randomWords.includes(randomWord)
+          ) {
+            randomWords.push(randomWord);
+          }
+        }
+        return randomWords;
+      }
+
+      // Function to display a word and its neighbors
+      function displayWord(word, dictionary) {
+        const mainWordElement = document.getElementById("mainWord");
+        const neighborListElement = document.getElementById("neighborList");
+        const winMessageElement = document.getElementById("winMessage");
+
+        // Clear the neighbor list
+        neighborListElement.innerHTML = "";
+
+        // Set the main word and its hop distance to the target word
+        const hopDistance = distancesDict[word]; // Get hop distance from the BFS result
+        mainWordElement.textContent = `${word} (Distance to Target: ${hopDistance})`;
+
+        // Check if the word is the target word and display the win message
+        if (word === targetWord) {
+          winMessageElement.style.display = "block"; // Show the win message
+          return; // No need to display neighbors if the user has won
+        } else {
+          winMessageElement.style.display = "none"; // Hide the win message
+        }
+
+        // Get neighbors from the dictionary
+        const neighbors = dictionary[word];
+
+        // Select the first five neighbors (if available)
+        const firstNeighbors = neighbors.slice(0, 10);
+
+        // Add first five neighbors to the list
+        firstNeighbors.forEach((neighbor) => {
+          const li = document.createElement("li");
+          const hopDistance = distancesDict[neighbor.neighbor];
+          if (displayHopDistance) {
+            li.textContent = `${neighbor.neighbor} (Distance: ${neighbor.distance}) (to Target: ${hopDistance})`;
+          } else {
+            li.textContent = `${neighbor.neighbor} (Distance: ${neighbor.distance})`;
+          }
+
+          li.classList.add("neighbor");
+          li.addEventListener("click", () => displayWord(neighbor.neighbor, dictionary));
+          neighborListElement.appendChild(li);
+        });
+
+        // Get five random words that are not part of the neighbors
+        const excludeWords = firstNeighbors.map((n) => n.neighbor);
+        const randomWords = getRandomWords(word, dictionary, excludeWords, 5);
+
+        // Add random words to the list
+        randomWords.forEach((randomWord) => {
+          const li = document.createElement("li");
+          li.textContent = `${randomWord} (Random Word)`;
+          const hopDistance = distancesDict[randomWord];
+          if (displayHopDistance) {
+            li.textContent = `${randomWord} (Random Word) (to Target: ${hopDistance})`;
+          } else {
+            li.textContent = `${randomWord} (Random Word)`;
+          }
+          li.classList.add("neighbor");
+          li.addEventListener("click", () => displayWord(randomWord, dictionary));
+          neighborListElement.appendChild(li);
+        });
+      }
+
+      fetch(
+        "https://raw.githubusercontent.com/jmfveneroso/word_game/refs/heads/main/compressed_words_base64.txt",
+      )
+        .then((response) => response.text())
+        .then((base64Content) => {
+          const wordDict = parseBase64File(base64Content);
+          console.log(wordDict);
+
+          const wordList = Object.keys(wordDict);
+          const randomWord = wordList[Math.floor(Math.random() * wordList.length)];
+
+          // Pick a random target word that is different from the random word
+          do {
+            targetWord = wordList[Math.floor(Math.random() * wordList.length)];
+          } while (targetWord === randomWord);
+
+          // Display the target word in the UI
+          document.getElementById("targetWord").textContent = targetWord;
+
+          distancesDict = calculateHopDistances(targetWord, wordDict);
+
+          // Display the random word and its neighbors
+          displayWord(randomWord, wordDict);
+        })
+        .catch((error) => {
+          console.error("Error fetching the file:", error);
+        });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,97 @@
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: #333;
+  font-family: sans-serif;
+  color: #fff;
+}
+
+canvas {
+  display: block;
+  margin-bottom: 10px;
+  background-color: #444;
+  cursor: grab;
+}
+
+canvas.grabbing {
+  cursor: grabbing;
+}
+
+.controls {
+  padding: 10px;
+  background-color: #222;
+  user-select: none;
+}
+
+.controls div {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+}
+
+.controls label {
+  display: inline-block;
+  min-width: 180px;
+  font-size: 0.9em;
+}
+
+.controls input[type="range"] {
+  width: 200px;
+  vertical-align: middle;
+  margin-right: 10px;
+}
+
+.controls span {
+  display: inline-block;
+  min-width: 50px;
+  text-align: right;
+  font-weight: bold;
+  font-size: 0.9em;
+}
+
+#ui {
+  position: absolute;
+  top: 15px;
+  left: 1000px;
+  font-size: 20px;
+  color: #333;
+  background-color: rgba(255, 255, 255, 0.8);
+  padding: 8px 12px;
+  border-radius: 5px;
+  z-index: 10;
+}
+
+#gameOverScreen {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0, 0, 0, 0.85);
+  color: white;
+  padding: 30px 40px;
+  border-radius: 10px;
+  text-align: center;
+  font-size: 24px;
+  display: none; /* Hidden by default */
+  z-index: 20;
+}
+
+#gameOverScreen div:first-child {
+  font-size: 48px;
+  margin-bottom: 15px;
+}
+
+#gameOverScreen button {
+  font-size: 18px;
+  padding: 10px 20px;
+  margin-top: 25px;
+  cursor: pointer;
+  background-color: #555;
+  color: white;
+  border: none;
+  border-radius: 5px;
+}
+
+#gameOverScreen button:hover {
+  background-color: #777;
+}

@@ -1,8 +1,8 @@
-import { GameState } from './game_state.js'; 
-import { Ball } from './ball.js'; 
-import { symbolDefinitions, L1_SYMBOLS } from './symbols.js'; 
-import { Config } from './config.js'; 
-import { spawnParticles, updateAndDrawParticles } from './particles.js'; 
+import { GameState } from "./game_state.js";
+import { Ball } from "./ball.js";
+import { symbolDefinitions, L1_SYMBOLS } from "./symbols.js";
+import { Config } from "./config.js";
+import { spawnParticles, updateAndDrawParticles } from "./particles.js";
 
 function getCombinedSymbolId(id1, id2) {
   for (const symbolId in symbolDefinitions) {
@@ -37,7 +37,43 @@ export function processCollisions() {
       const dx = ballA.x - ballB.x;
       const dy = ballA.y - ballB.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
+
       if (distance < ballA.radius + ballB.radius && distance > 0.1) {
+        // Check if either ball is the destructive VOID symbol
+        // Check if one ball is a VOID symbol and the other is not.
+        if (
+          (ballA.symbolId === "S1_VOID" && ballB.symbolId !== "S1_VOID") ||
+          (ballB.symbolId === "S1_VOID" && ballA.symbolId !== "S1_VOID")
+        ) {
+          // Identify which ball is the non-void symbol to be destroyed.
+          const targetBall = ballA.symbolId === "S1_VOID" ? ballB : ballA;
+
+          // Mark only the other symbol for destruction.
+          GameState.ballsToRemoveThisFrame.push(targetBall);
+
+          const midX =
+            (ballA.x * ballB.radius + ballB.x * ballA.radius) /
+            (ballA.radius + ballB.radius);
+          const midY =
+            (ballA.y * ballB.radius + ballB.y * ballA.radius) /
+            (ballA.radius + ballB.radius);
+
+          // Give a small point reward for the destruction.
+          GameState.score += symbolDefinitions["S1_VOID"].eliminationPoints;
+
+          // Spawn destruction particles at the collision point.
+          spawnParticles(
+            Config.Debris_Particle_Count,
+            midX,
+            midY,
+            Config.particleDebrisColor,
+            Config.Debris_Particle_Speed,
+            1,
+            4
+          );
+          break; // Exit the inner loop since the target ball is being destroyed.
+        }
+
         const midX =
           (ballA.x * ballB.radius + ballB.x * ballA.radius) /
           (ballA.radius + ballB.radius);
@@ -106,6 +142,11 @@ export function processCollisions() {
               combinedSymId,
               newIsBlack
             );
+
+            if (newBall.level > GameState.highestLevelAchieved) {
+              GameState.highestLevelAchieved = newBall.level;
+            }
+
             newBall.vx = newVx;
             newBall.vy = newVy;
             GameState.ballsToAddNewThisFrame.push(newBall);
@@ -140,7 +181,9 @@ export function processCollisions() {
   }
 
   if (GameState.ballsToRemoveThisFrame.length > 0) {
-    GameState.balls = GameState.balls.filter((b) => !GameState.ballsToRemoveThisFrame.includes(b));
+    GameState.balls = GameState.balls.filter(
+      (b) => !GameState.ballsToRemoveThisFrame.includes(b)
+    );
   }
 
   if (GameState.ballsToAddNewThisFrame.length > 0) {

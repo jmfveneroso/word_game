@@ -84,3 +84,45 @@ export function addPlayerEvents() {
     }
   });
 }
+
+export function addPlayerWindEvents() {
+  canvas.addEventListener("mousedown", function (event) {
+    if (GameState.gameOver) return;
+
+    GameState.isDrawingWind = true;
+    const rect = canvas.getBoundingClientRect();
+    const startPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    // Initialize a new wind curve
+    GameState.windCurve = {
+      points: [startPoint],
+      createdAt: Date.now(),
+    };
+  });
+
+  document.addEventListener("mousemove", function (event) {
+    if (!GameState.isDrawingWind || !GameState.windCurve) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const newPoint = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+
+    // Only add a new point if the mouse has moved a minimum distance
+    // This prevents the points array from becoming too large and improves performance
+    const lastPoint = GameState.windCurve.points[GameState.windCurve.points.length - 1];
+    const distance = Math.sqrt((newPoint.x - lastPoint.x) ** 2 + (newPoint.y - lastPoint.y) ** 2);
+
+    if (distance > Config.minPointDistance) {
+      GameState.windCurve.points.push(newPoint);
+    }
+  });
+
+  document.addEventListener("mouseup", function () {
+    GameState.isDrawingWind = false;
+  });
+}

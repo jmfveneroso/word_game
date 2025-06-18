@@ -13,6 +13,11 @@ export const GameState = {
   ballsToRemoveThisFrame: [],
   ballsToAddNewThisFrame: [],
   animationFrameId: 0,
+  isDrawingWind: false,
+  windCurve: null, // Will hold { points: [], createdAt: 0 }
+  animationFrameId: 0,
+  totalElapsedTime: 0,
+  highestLevelAchieved: 1,
 };
 
 function triggerGameOver() {
@@ -29,14 +34,14 @@ export function handleLifeLoss(ball) {
   if (GameState.gameOver) return;
   GameState.lives--;
   updateUI();
-  if (lives <= 0) {
-    triggerGameOver();
+  if (GameState.lives <= 0) {
+    // triggerGameOver();
   }
 }
 
 export function updateUI() {
-  document.getElementById("score").textContent = GameState.score;
-  document.getElementById("lives").textContent = GameState.lives;
+  // document.getElementById("score").textContent = GameState.score;
+  // document.getElementById("lives").textContent = GameState.lives;
 }
 
 function resetGame() {
@@ -47,6 +52,7 @@ function resetGame() {
   GameState.particles = [];
   GameState.grabbedBall = null;
   GameState.gameOver = false;
+  GameState.highestLevelAchieved = 3;
 
   updateUI();
   document.getElementById("gameOverScreen").style.display = "none";

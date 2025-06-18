@@ -1,8 +1,14 @@
 import { spawnParticles, updateAndDrawParticles } from "./particles.js";
-import { mandalaDefinitions, symbolDefinitions, L1_SYMBOLS } from "./symbols.js";
+import { drawMandala } from "./drawing.js";
+import {
+  mandalaDefinitions,
+  symbolDefinitions,
+  L1_SYMBOLS,
+} from "./symbols.js";
 import { Config } from "./Config.js";
 import { canvasWidth, canvasHeight, ctx } from "./ui.js";
 import { handleLifeLoss } from "./game_state.js";
+import { GameState } from "./game_state.js";
 
 export class Ball {
   constructor(x, y, actualRadius, initialSymbolId, isBlack) {
@@ -18,139 +24,6 @@ export class Ball {
     this.grabStartX = 0;
     this.grabStartY = 0;
     this.slingshotVector = { x: 0, y: 0 };
-  }
-
-  /**
-    * Draws a mandala-like figure on a canvas context.
-    * @param {CanvasRenderingContext2D} ctx - The canvas rendering context.
-    * @param {number} centerX - The x-coordinate of the mandala's center.
-    * @param {number} centerY - The y-coordinate of the mandala's center.
-    * @param {number} innerRadius - The radius of the central circle.
-    * @param {number} numPoints - The number of leaves or spikes.
-    * @param {number} spikeDistance - The distance of the leaf tip from the center.
-    * @param {string} leafType - Determines the curve direction ('left', 'right', or 'both').
-    * @param {string} color - The color of the figure.
-    * @param {number} curveAmount - A value controlling how much the leaves bend.
-    @param {string} fillStyle - The rendering style ('lines', 'solid', 'stripes').
-  */
-  drawMandala(
-    ctx,
-    centerX,
-    centerY,
-    innerRadius,
-    numPoints,
-    spikeDistance,
-    leafType,
-    color,
-    curveAmount,
-    fillStyle
-  ) {
-    // Save the current state of the context to avoid side effects
-    ctx.save();
-  
-    // --- NEW: LOGIC FOR FILL STYLE ---
-    // Set drawing styles based on the chosen fill style
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5; // Slightly thicker for better visibility of lines
-  
-    // Default fill is solid color
-    ctx.fillStyle = color;
-  
-    // If the style is stripes, create a pattern and use it as the fill style
-    if (fillStyle === "stripes") {
-      const patternCanvas = document.createElement('canvas');
-      const patternCtx = patternCanvas.getContext('2d');
-      patternCanvas.width = 8;
-      patternCanvas.height = 8;
-  
-      patternCtx.strokeStyle = color;
-      patternCtx.lineWidth = 1.5;
-      patternCtx.beginPath();
-      patternCtx.moveTo(0, 8);
-      patternCtx.lineTo(8, 0);
-      patternCtx.moveTo(-2, 2);
-      patternCtx.lineTo(2, -2);
-      patternCtx.moveTo(6, 10);
-      patternCtx.lineTo(10, 6);
-      patternCtx.stroke();
-  
-      ctx.fillStyle = ctx.createPattern(patternCanvas, 'repeat');
-    }
-    // --- END OF NEW LOGIC ---
-  
-    // 1. Draw Inner Circle
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, innerRadius, 0, 2 * Math.PI);
-    // --- MODIFIED: Apply fill or stroke based on style ---
-    if (fillStyle === 'lines') {
-        ctx.stroke();
-    } else { // 'solid' or 'stripes'
-        ctx.fill();
-    }
-  
-    // 2. Draw Leaves/Spikes
-    for (let i = 0; i < numPoints; i++) {
-      const angle = (i / numPoints) * 2 * Math.PI;
-  
-      const startX = centerX + innerRadius * Math.cos(angle);
-      const startY = centerY + innerRadius * Math.sin(angle);
-      const endX = centerX + spikeDistance * Math.cos(angle);
-      const endY = centerY + spikeDistance * Math.sin(angle);
-  
-      const midX = (startX + endX) / 2;
-      const midY = (startY + endY) / 2;
-      const anglePerp = angle + Math.PI / 2;
-  
-      const cpX = midX + curveAmount * Math.cos(anglePerp);
-      const cpY = midY + curveAmount * Math.sin(anglePerp);
-      const cpX_inv = midX - curveAmount * Math.cos(anglePerp);
-      const cpY_inv = midY - curveAmount * Math.sin(anglePerp);
-  
-      // --- MODIFIED: Different path creation for lines vs. filled shapes ---
-      if (fillStyle === 'lines') {
-        // For 'lines' style, draw open curves just like before
-        ctx.beginPath();
-        if (leafType === "right" || leafType === "both") {
-          ctx.moveTo(startX, startY);
-          ctx.quadraticCurveTo(cpX, cpY, endX, endY);
-          ctx.stroke();
-        }
-        ctx.beginPath(); // new path for the other side to avoid connecting lines
-        if (leafType === "left" || leafType === "both") {
-          ctx.moveTo(startX, startY);
-          ctx.quadraticCurveTo(cpX_inv, cpY_inv, endX, endY);
-          ctx.stroke();
-        }
-      } else {
-        // For 'solid' or 'stripes', create closed paths to fill
-        if (leafType === "both") {
-          ctx.beginPath();
-          ctx.moveTo(startX, startY);
-          ctx.quadraticCurveTo(cpX, cpY, endX, endY);
-          // Curve back on the other side to create a closed leaf shape
-          ctx.quadraticCurveTo(cpX_inv, cpY_inv, startX, startY);
-          ctx.fill();
-        } else {
-          if (leafType === "right") {
-            ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.quadraticCurveTo(cpX, cpY, endX, endY);
-            ctx.closePath(); // Connects end point back to start point
-            ctx.fill();
-          }
-          if (leafType === "left") {
-            ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.quadraticCurveTo(cpX_inv, cpY_inv, endX, endY);
-            ctx.closePath(); // Connects end point back to start point
-            ctx.fill();
-          }
-        }
-      }
-    }
-  
-    // Restore the context to its original state
-    ctx.restore();
   }
 
   drawSlingshot() {
@@ -208,6 +81,10 @@ export class Ball {
         ? Config.levelColorsBlack[0]
         : Config.levelColorsGray[0];
     }
+
+    if (this.symbolId === "S1_VOID") {
+      fillColor = Config.voidSymbolColor;
+    }
     ctx.fillStyle = fillColor;
     // -------------------------------------------------
 
@@ -235,7 +112,7 @@ export class Ball {
         : Config.symbolColor;
 
       // Call the drawMandala function with scaled parameters
-      this.drawMandala(
+      drawMandala(
         ctx,
         this.x,
         this.y,
@@ -249,7 +126,7 @@ export class Ball {
       );
     }
 
-    this.drawSlingshot();
+    // this.drawSlingshot();
   }
 
   doBottomCheck() {
@@ -289,12 +166,131 @@ export class Ball {
   }
 
   applyGravity(cfg) {
-    this.y += cfg.terminalVelocity;
+    if (this.symbolId === "S1_VOID") {
+      this.y += 2.0 * cfg.terminalVelocity;
+    } else { 
+      let multiplier = this.radius / 20.0;
+      this.y += (1 / multiplier) * cfg.terminalVelocity;
+    }
   }
 
   applyFriction(cfg) {
     this.vx *= cfg.friction;
     this.vy *= cfg.friction;
+  }
+
+  applyWindForce(cfg) {
+    if (!GameState.windCurve) return;
+    if (this.symbolId === "S1_VOID") return;
+
+    const curvePoints = GameState.windCurve.points;
+    if (curvePoints.length < 2) return;
+
+    let closestDist = Infinity;
+    let closestPoint = null;
+    let curveDirection = { x: 0, y: 0 };
+
+    // 1. Find the closest point on the entire wind curve to the ball
+    for (let i = 0; i < curvePoints.length - 1; i++) {
+      const p1 = curvePoints[i];
+      const p2 = curvePoints[i + 1];
+
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+
+      // If the segment has no length, skip it
+      if (dx === 0 && dy === 0) continue;
+
+      // Project the ball's position onto the line segment
+      const t =
+        ((this.x - p1.x) * dx + (this.y - p1.y) * dy) / (dx * dx + dy * dy);
+
+      let currentClosest;
+      if (t < 0) {
+        currentClosest = p1;
+      } else if (t > 1) {
+        currentClosest = p2;
+      } else {
+        currentClosest = { x: p1.x + t * dx, y: p1.y + t * dy };
+      }
+
+      const dist = Math.sqrt(
+        (this.x - currentClosest.x) ** 2 + (this.y - currentClosest.y) ** 2
+      );
+
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestPoint = currentClosest;
+        const mag = Math.sqrt(dx * dx + dy * dy);
+        curveDirection = { x: dx / mag, y: dy / mag };
+      }
+    }
+
+    // 2. If the closest point is within the influence radius, apply forces
+    // if (closestPoint && closestDist < cfg.windInfluenceRadius) {
+    //   // A. The Normal Force (Coupling) - Pulls the ball TOWARDS the line
+    //   const normalDx = closestPoint.x - this.x;
+    //   const normalDy = closestPoint.y - this.y;
+
+    //   this.vx += normalDx * cfg.windCouplingStrength;
+    //   this.vy += normalDy * cfg.windCouplingStrength;
+
+    //   // B. The Tangential Force (Propulsion) - Pushes the ball ALONG the line
+    //   this.vx += curveDirection.x * cfg.windStrength;
+    //   this.vy += curveDirection.y * cfg.windStrength;
+    // }
+    if (closestPoint && closestDist < cfg.windInfluenceRadius) {
+      // A. The Normal Force (Coupling) - Pulls the ball TOWARDS the line's position.
+      // This remains the same.
+      const normalDx = closestPoint.x - this.x;
+      const normalDy = closestPoint.y - this.y;
+      this.vx += normalDx * cfg.windCouplingStrength;
+      this.vy += normalDy * cfg.windCouplingStrength;
+
+      // B. The Tangential Force (Propulsion) - Guides the ball's SPEED along the line.
+      // This new logic prevents oscillation.
+
+      // Calculate the ball's current speed projected onto the curve's direction
+      const speedAlongCurve =
+        this.vx * curveDirection.x + this.vy * curveDirection.y;
+
+      // If the ball is slower than the max wind speed, apply a force to speed it up.
+      if (speedAlongCurve < cfg.windMaxSpeed) {
+        const forceMagnitude =
+          (cfg.windMaxSpeed - speedAlongCurve) * cfg.windStrength;
+        this.vx += curveDirection.x * forceMagnitude;
+        this.vy += curveDirection.y * forceMagnitude;
+      }
+    }
+  }
+
+  applySidewaysWind(cfg) {
+    // Void symbols remain immune to the wind
+    if (this.symbolId === "S1_VOID") {
+      return;
+    }
+
+    // Convert total elapsed time from milliseconds to seconds for more intuitive frequency values
+    const timeInSeconds = GameState.totalElapsedTime / 1000;
+
+    // --- Calculate the time-based oscillation ---
+    // We use two sine waves with different frequencies and add them together.
+    // This creates a much more natural, less repetitive pattern than a single sine wave.
+    const oscillation1 = Math.sin(
+      timeInSeconds * cfg.windOscillationFrequency1
+    );
+    const oscillation2 = Math.sin(
+      timeInSeconds * cfg.windOscillationFrequency2
+    );
+
+    // Combine the oscillations and scale by the amplitude
+    const totalOscillation =
+      ((oscillation1 + oscillation2) / 2) * cfg.windOscillationAmplitude;
+
+    // The final wind is the base strength from the slider plus the current oscillation
+    const currentWindStrength = cfg.sidewaysWindStrength + totalOscillation;
+
+    this.vx += currentWindStrength;
   }
 
   doHorizontalBoundaryCheck(cfg) {
@@ -309,12 +305,15 @@ export class Ball {
   }
 
   update(cfg) {
-    if (this.isGrabbed) {
-      this.applyGrab();
-      // return true;
-    }
+    // if (this.isGrabbed) {
+    //   this.applyGrab();
+    //   // return true;
+    // }
 
     this.applyGravity(cfg);
+    this.applyWindForce(cfg);
+    this.applySidewaysWind(cfg);
+
     this.applyFriction(cfg);
 
     this.y += this.vy;

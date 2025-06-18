@@ -3,10 +3,11 @@ import { symbolDefinitions, L1_SYMBOLS } from './symbols.js';
 import { spawnParticles, updateAndDrawParticles } from './particles.js'; 
 import { Ball } from './ball.js'; 
 import { processCollisions } from './physics.js'; 
-import { addUiEvents, clearCanvas } from './ui.js'; 
+import { addUiEvents, clearCanvas, drawHighestLevelDisplay } from './ui.js'; 
 import { GameState, updateUI } from './game_state.js'; 
-import { addPlayerEvents } from './player.js';
+import { addPlayerEvents, addPlayerWindEvents } from './player.js';
 import { addBallSpawnsEvents } from './environment.js';
+import { drawWindCurve } from './wind.js';
 
 let lastFrameTime = performance.now();
 function updateBalls() {
@@ -28,16 +29,21 @@ function draw(deltaTime) {
   clearCanvas();
   updateAndDrawParticles(deltaTime);
   drawBalls();
+  drawWindCurve();
+  drawHighestLevelDisplay();
 }
 
 // Initialize.
-addPlayerEvents();
+// addPlayerEvents();
+addPlayerWindEvents();
+
 addBallSpawnsEvents();
 addUiEvents();
 
 function gameLoop(currentTime) {
   const deltaTime = currentTime - lastFrameTime;
   lastFrameTime = currentTime;
+  GameState.totalElapsedTime += deltaTime;
 
   if (GameState.gameOver) {
     draw(deltaTime);

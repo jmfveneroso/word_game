@@ -1,13 +1,27 @@
-import { Config } from './config.js'; 
-import { symbolDefinitions, L1_SYMBOLS } from './symbols.js'; 
-import { spawnParticles, updateAndDrawParticles } from './particles.js'; 
-import { Ball } from './ball.js'; 
-import { processCollisions } from './physics.js'; 
-import { addUiEvents, clearCanvas, drawHighestLevelDisplay } from './ui.js'; 
-import { GameState, updateUI } from './game_state.js'; 
-import { addPlayerEvents, addPlayerWindEvents } from './player.js';
-import { addBallSpawnsEvents } from './environment.js';
-import { drawWindCurve } from './wind.js';
+import { Config } from "./config.js";
+import { symbolDefinitions, L1_SYMBOLS } from "./symbols.js";
+import {
+  spawnParticles,
+  updateAndDrawParticles,
+  spawnParticlesAlongCurve,
+} from "./particles.js";
+import { Ball } from "./ball.js";
+import { processCollisions, getCombinedSymbolId } from "./physics.js";
+import {
+  addUiEvents,
+  clearCanvas,
+  drawHighestLevelDisplay,
+  updateScoreDisplay,
+  drawLivesDisplay,
+  ctx,
+  canvasWidth,
+  canvasHeight,
+  canvas,
+} from "./ui.js";
+import { GameState, updateUI, resetGameState } from "./game_state.js";
+import { addPlayerEvents, addPlayerWindEvents } from "./player.js";
+import { addBallSpawnsEvents, resetBallCreationTimer } from "./environment.js";
+import { drawWindCurve, checkWindCombination } from "./wind.js";
 
 let lastFrameTime = performance.now();
 function updateBalls() {
@@ -19,18 +33,147 @@ function updateBalls() {
   }
 }
 
-function drawBalls() {
+function updateDangerHighlights(cfg) {
+  // First, reset the dangerous flag on all balls from the previous frame
   for (const ball of GameState.balls) {
-    ball.draw();
+    ball.isDangerous = false;
+  }
+
+  // If the feature is disabled in the config, do nothing further.
+  if (!cfg.enableDangerHighlight) return;
+
+  // --- NEW: Create a Map for fast lookups ---
+  // The map will store symbol IDs as keys and an array of balls as values.
+  // e.g., { 'S2_SOLID_BOTH': [ball1, ball2], 'S3_LINES_BOTH': [ball3] }
+  const symbolIdToBallsMap = new Map();
+  for (const ball of GameState.balls) {
+    if (!symbolIdToBallsMap.has(ball.symbolId)) {
+      symbolIdToBallsMap.set(ball.symbolId, []);
+    }
+    symbolIdToBallsMap.get(ball.symbolId).push(ball);
+  }
+
+  // Iterate through every possible pair of balls
+  for (let i = 0; i < GameState.balls.length; i++) {
+    for (let j = i + 1; j < GameState.balls.length; j++) {
+      const ballA = GameState.balls[i];
+      const ballB = GameState.balls[j];
+
+      // Skip check if either ball is below the minimum level threshold
+      if (
+        ballA.level < cfg.dangerHighlightMinLevel ||
+        ballB.level < cfg.dangerHighlightMinLevel
+      ) {
+        continue;
+      }
+
+      // Condition 1: Are the two ingredient balls close to each other?
+      const pairDistance = Math.sqrt(
+        (ballA.x - ballB.x) ** 2 + (ballA.y - ballB.y) ** 2
+      );
+      if (pairDistance >= cfg.dangerHighlightMaxDistance) {
+        continue;
+      }
+
+      // Condition 2: Do they form a valid new symbol?
+      const resultId = getCombinedSymbolId(ballA.symbolId, ballB.symbolId);
+      if (!resultId) {
+        continue;
+      }
+
+      // Condition 3: Does that new symbol type already exist on screen?
+      if (symbolIdToBallsMap.has(resultId)) {
+        const existingResultBalls = symbolIdToBallsMap.get(resultId);
+
+        let finalResultBall = null;
+        // Is one of our ingredient balls (A or B) close to any of the existing result balls?
+        const isCloseToResult = existingResultBalls.some((resultBall) => {
+          const distToA = Math.sqrt(
+            (ballA.x - resultBall.x) ** 2 + (ballA.y - resultBall.y) ** 2
+          );
+          const distToB = Math.sqrt(
+            (ballB.x - resultBall.x) ** 2 + (ballB.y - resultBall.y) ** 2
+          );
+
+          const isCloseToResult =
+            distToA < cfg.dangerHighlightMaxDistance ||
+            distToB < cfg.dangerHighlightMaxDistance;
+
+          if (isCloseToResult) {
+            finalResultBall = resultBall;
+          }
+
+          return isCloseToResult;
+        });
+
+        if (isCloseToResult) {
+          // If all conditions are met, mark the pair as dangerous.
+          ballA.isDangerous = true;
+          ballB.isDangerous = true;
+          finalResultBall.isDangerous = true;
+        }
+      }
+    }
   }
 }
 
-function draw(deltaTime) {
+function drawBalls(cfg) {
+  for (const ball of GameState.balls) {
+    ball.draw(cfg);
+  }
+}
+
+function draw(cfg, deltaTime) {
+  // --- Screen Shake Logic ---
+  let shakeX = 0;
+  let shakeY = 0;
+
+  // Check if the life loss animation is currently active
+  if (GameState.isLosingLife) {
+    const elapsed = Date.now() - GameState.lifeLossAnimationStart;
+    const progress = elapsed / cfg.lifeLossAnimationDuration;
+
+    if (progress < 1) {
+      // As the animation progresses, the shake gets weaker
+      const currentMagnitude = cfg.screenShakeMagnitude * (1 - progress);
+      shakeX = (Math.random() - 0.5) * currentMagnitude;
+      shakeY = (Math.random() - 0.5) * currentMagnitude;
+    }
+  }
+
+  canvas.style.backgroundColor = cfg.invertColors ? cfg.backgroundColor.inverted : cfg.backgroundColor.normal;
+
+  // Save the context state and apply the shake translation
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+
+  // --- Original Drawing Logic ---
   clearCanvas();
   updateAndDrawParticles(deltaTime);
-  drawBalls();
-  drawWindCurve();
+  drawBalls(cfg);
+  drawWindCurve(cfg);
   drawHighestLevelDisplay();
+  drawLivesDisplay();
+
+  // --- Screen Flash Logic ---
+  // If the animation is active, draw a fading red overlay
+  if (GameState.isLosingLife) {
+    const elapsed = Date.now() - GameState.lifeLossAnimationStart;
+    const progress = elapsed / cfg.lifeLossAnimationDuration;
+
+    if (progress < 1) {
+      // The flash is strongest at the start and fades out
+      const currentOpacity = (1 - progress) * 0.6; // Get base opacity from the color string
+      ctx.fillStyle = cfg.lifeLossFlashColor.replace(
+        /[^,]+(?=\))/,
+        currentOpacity.toFixed(2)
+      );
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    }
+  }
+
+  // Restore the context to remove the translation for the next frame
+  ctx.restore();
 }
 
 // Initialize.
@@ -40,21 +183,70 @@ addPlayerWindEvents();
 addBallSpawnsEvents();
 addUiEvents();
 
+function restartGame() {
+  // 1. Reset all game data to its initial state
+  resetGameState();
+
+  // 2. Hide the game over screen
+  document.getElementById("gameOverScreen").style.display = "none";
+
+  // 3. Restart the ball creation timer with the current config settings
+  resetBallCreationTimer();
+
+  // 4. Update the UI to show the reset scores
+  updateUI();
+
+  // 5. Cancel the old animation loop and start a fresh one
+  if (GameState.animationFrameId) {
+    cancelAnimationFrame(GameState.animationFrameId);
+  }
+  lastFrameTime = performance.now(); // Reset the timer for deltaTime calculations
+  GameState.animationFrameId = requestAnimationFrame(gameLoop);
+}
+
+document.getElementById("restartButton").addEventListener("click", restartGame);
+
 function gameLoop(currentTime) {
   const deltaTime = currentTime - lastFrameTime;
   lastFrameTime = currentTime;
+
   GameState.totalElapsedTime += deltaTime;
 
+  if (
+    GameState.isLosingLife &&
+    Date.now() - GameState.lifeLossAnimationStart >
+      Config.lifeLossAnimationDuration
+  ) {
+    GameState.isLosingLife = false;
+  }
+
   if (GameState.gameOver) {
-    draw(deltaTime);
+    draw(Config, deltaTime);
     return;
   }
 
-  processCollisions();
+  GameState.windCapturedBalls = [];
+  for (const ball of GameState.balls) {
+    ball.isCapturedByWind = false;
+  }
+
+  updateDangerHighlights(Config);
+
+  updateScoreDisplay();
+  updateUI();
+
+  spawnParticlesAlongCurve(Config, deltaTime);
+
+  GameState.ballsToRemoveThisFrame = [];
+  GameState.ballsToAddNewThisFrame = [];
+
   updateBalls();
 
-  draw(deltaTime);
-  updateUI();
+  checkWindCombination(Config);
+
+  processCollisions();
+
+  draw(Config, deltaTime);
 
   GameState.animationFrameId = requestAnimationFrame(gameLoop);
 }

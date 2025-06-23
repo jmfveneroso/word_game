@@ -2,73 +2,33 @@
 <html>
   <head>
     <title>Go Go Ame - Leveled Colors</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <div class="controls">
-      <!--<div>
-        <label for="gravitySlider">Gravity:</label>
-        <input type="range" id="gravitySlider" min="0" max="0.1" step="0.005" value="0.05">
-        <span id="gravityValue">0.050</span>
-      </div>-->
-      <div>
-        <label for="terminalVelSlider">Terminal Velocity:</label>
-        <input type="range" id="terminalVelSlider" min="0.2" max="3.5" step="0.1" value="0.3">
-        <span id="terminalVelValue">0.3</span>
-      </div>
-      <div>
-        <label for="throwMultiplierSlider">Throw Multiplier:</label>
-        <input type="range" id="throwMultiplierSlider" min="0.02" max="0.30" step="0.01" value="0.10">
-        <span id="throwMultiplierValue">0.10</span>
-      </div>
-      <div>
-        <label for="baseBallRadiusSlider">Base Ball Radius (L1):</label>
-        <input type="range" id="baseBallRadiusSlider" min="15" max="70" step="1" value="20">
-        <span id="baseBallRadiusValue">20</span>
-      </div>
-      <div>
-        <label for="creationIntervalSlider">New Ball Interval (ms):</label>
-        <input type="range" id="creationIntervalSlider" min="10" max="500" step="20" value="200">
-        <span id="creationIntervalValue">200</span>
-      </div>
-      <div>
-        <label for="frictionSlider">Friction:</label>
-        <input type="range" id="frictionSlider" min="0.85" max="1.0" step="0.005" value="0.985">
-        <span id="frictionValue">0.985</span>
-      </div>
-      <div>
-        <label for="slingshotPowerSlider">Slingshot Power:</label>
-        <input type="range" id="slingshotPowerSlider" min="0.01" max="0.15" step="0.01" value="0.05">
-        <span id="slingshotPowerValue">0.05</span>
-      </div>
-      <div>
-        <label for="windCouplingSlider">Wind Coupling Strength:</label>
-        <input type="range" id="windCouplingSlider" min="0" max="0.1" step="0.001" value="0.02">
-        <span id="windCouplingValue">0.020</span>
-      </div>
-      <div>
-        <label for="windInfluenceSlider">Wind Influence:</label>
-        <input type="range" id="windInfluenceSlider" min="20" max="100" step="10" value="0.3">
-        <span id="windInfluenceValue">40</span>
-      </div>
-    </div>
+    <button id="expand-controls-btn">CONFIG</button>
 
-    <div id="ui">
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <canvas id="highestLevelCanvas" width="150" height="150" style="background-color: #fff; border-radius: 4px;"></canvas>
-      </div>
-    </div>
-    
-    <!--<div id="ui">
-        Score: <span id="score">0</span> | Lives: <span id="lives">100</span>
-    </div>-->
-    <div id="gameOverScreen">
-        <div>終</div>
-        <div>Final Score: <span id="finalScore">0</span></div>
-        <button id="restartButton">Retry (再試行)</button>
-    </div>
+    <div class="controls hidden"></div>
 
-    <canvas id="gameCanvas"></canvas>
+    <div id="game-container">
+      <div id="ui">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+        <canvas id="highestLevelCanvas" width="80" height="80" style="opacity: 0.7;"></canvas>
+        <div id="score-container">
+            <!--<div id="highestScoreDisplay">BEST: 0</div>-->
+            <div id="scoreDisplay">0</div>
+        </div>
+        </div>
+      </div>
+      
+      <div id="gameOverScreen">
+          <div></div>
+          <div>Final Score: <span id="finalScore">0</span></div>
+          <button id="restartButton">Retry</button>
+      </div>
+
+      <canvas id="gameCanvas"></canvas>
+    </div>
 
     <script src="script.js" type="module"></script>
   </body>

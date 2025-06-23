@@ -1,128 +1,136 @@
 import { Config } from "./config.js";
-import { canvasWidth, canvasHeight, canvas, ctx, controlsDiv } from "./ui.js";
-import { GameState, updateUI } from "./game_state.js";
+import { canvas } from "./ui.js";
+import { GameState } from "./game_state.js";
 
-export function addPlayerEvents() {
-  canvas.addEventListener("mousedown", function (event) {
-    if (GameState.gameOver) return;
-    const rect = canvas.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const clickY = event.clientY - rect.top;
-    for (let i = GameState.balls.length - 1; i >= 0; i--) {
-      let ball = GameState.balls[i];
-      if (ball.isGrabbed) continue;
-      const distance = Math.sqrt(
-        (clickX - ball.x) ** 2 + (clickY - ball.y) ** 2
-      );
-      if (distance < ball.radius) {
-        GameState.grabbedBall = ball;
-        GameState.grabbedBall.isGrabbed = true;
-        GameState.grabbedBall.vx = 0;
-        GameState.grabbedBall.vy = 0;
-        GameState.lastMouseX = event.clientX;
-        GameState.lastMouseY = event.clientY;
-        canvas.classList.add("grabbing");
-        break;
-      }
-    }
-  });
+// --- Generic Input Handlers ---
+// These functions contain the core logic and are called by both mouse and touch events.
 
-  // Replace the entire 'mousemove' event listener with this new implementation
-  document.addEventListener("mousemove", function (event) {
-    if (GameState.grabbedBall) {
-      const rect = canvas.getBoundingClientRect();
-      const mouseX = event.clientX - rect.left;
-      const mouseY = event.clientY - rect.top;
+/**
+ * Starts the wind curve drawing process at a specific coordinate.
+ * @param {number} x The starting x-coordinate.
+ * @param {number} y The starting y-coordinate.
+ */
+function handleDragStart(x, y) {
+  if (GameState.gameOver) return;
 
-      // Calculate the vector from the original grab point
+  GameState.isDrawingWind = true;
 
-      // Uncomment for slingshot.
-      // const deltaX = GameState.grabbedBall.x - mouseX;
-      // const deltaY = GameState.grabbedBall.y - mouseY;
-      const deltaX = mouseX - GameState.grabbedBall.x;
-      const deltaY = mouseY - GameState.grabbedBall.y;
-      const mag = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-
-      if (mag > 0) {
-        // Cap the magnitude at the max strength
-        const cappedMag = Math.min(mag, Config.slingshotMaxStrength);
-        const launchX = (deltaX / mag) * cappedMag;
-        const launchY = (deltaY / mag) * cappedMag;
-        GameState.grabbedBall.slingshotVector = { x: launchX, y: launchY };
-      }
-
-      // Uncomment for drag.
-      // if (GameState.grabbedBall.slingshotVector) {
-      //   GameState.grabbedBall.vx =
-      //     GameState.grabbedBall.slingshotVector.x *
-      //     Config.slingshotPowerMultiplier;
-      //   GameState.grabbedBall.vy =
-      //     GameState.grabbedBall.slingshotVector.y *
-      //     Config.slingshotPowerMultiplier;
-      // }
-    }
-  });
-
-  // Replace the entire 'mouseup' event listener with this new implementation
-  document.addEventListener("mouseup", function () {
-    if (GameState.grabbedBall) {
-      // Apply the slingshot vector as velocity
-      if (GameState.grabbedBall.slingshotVector) {
-        GameState.grabbedBall.vx =
-          GameState.grabbedBall.slingshotVector.x *
-          Config.slingshotPowerMultiplier;
-        GameState.grabbedBall.vy =
-          GameState.grabbedBall.slingshotVector.y *
-          Config.slingshotPowerMultiplier;
-      }
-
-      // Reset and release the ball
-      GameState.grabbedBall.isGrabbed = false;
-      GameState.grabbedBall.slingshotVector = { x: 0, y: 0 };
-      GameState.grabbedBall = null;
-      canvas.classList.remove("grabbing");
-    }
-  });
+  // Initialize a new wind curve
+  GameState.windCurve = {
+    points: [{ x, y }],
+    createdAt: Date.now(),
+    particleSpawnAccumulator: 0,
+  };
 }
 
+/**
+ * Continues the wind curve drawing process at a new coordinate.
+ * @param {number} x The new x-coordinate.
+ * @param {number} y The new y-coordinate.
+ */
+function handleDragMove(x, y) {
+  if (!GameState.isDrawingWind || !GameState.windCurve) return;
+
+  const lastPoint =
+    GameState.windCurve.points[GameState.windCurve.points.length - 1];
+  const distance = Math.sqrt((x - lastPoint.x) ** 2 + (y - lastPoint.y) ** 2);
+
+  // Only add a new point if the mouse/finger has moved a minimum distance
+  if (distance > Config.minPointDistance) {
+    GameState.windCurve.points.push({ x, y });
+  }
+}
+
+/**
+ * Ends the wind curve drawing process.
+ */
+function handleDragEnd() {
+  if (GameState.windCurve) {
+    let totalLength = 0;
+    const points = GameState.windCurve.points;
+
+    // Calculate the total length of the curve by summing its segments
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      totalLength += Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
+    }
+
+    // Calculate the final lifetime based on the length
+    const dynamicLifetime = totalLength * Config.windLifetimePerPixel;
+    GameState.windCurve.lifetime = Config.windBaseLifetime + dynamicLifetime;
+  }
+
+  GameState.isDrawingWind = false;
+}
+
+export function addPlayerEvents() {}
+// --- Main Exported Function ---
+
+/**
+ * Sets up all player input listeners for both mouse (desktop) and touch (mobile).
+ */
 export function addPlayerWindEvents() {
-  canvas.addEventListener("mousedown", function (event) {
-    if (GameState.gameOver) return;
+  // NOTE: We REMOVE `const rect = ...` from here.
 
-    GameState.isDrawingWind = true;
+  // --- Mouse Event Listeners ---
+  canvas.addEventListener("mousedown", (event) => {
+    // Get the fresh canvas position at the moment of the event
     const rect = canvas.getBoundingClientRect();
-    const startPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-
-    // Initialize a new wind curve
-    GameState.windCurve = {
-      points: [startPoint],
-      createdAt: Date.now(),
-    };
+    handleDragStart(event.clientX - rect.left, event.clientY - rect.top);
   });
 
-  document.addEventListener("mousemove", function (event) {
-    if (!GameState.isDrawingWind || !GameState.windCurve) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const newPoint = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-
-    // Only add a new point if the mouse has moved a minimum distance
-    // This prevents the points array from becoming too large and improves performance
-    const lastPoint = GameState.windCurve.points[GameState.windCurve.points.length - 1];
-    const distance = Math.sqrt((newPoint.x - lastPoint.x) ** 2 + (newPoint.y - lastPoint.y) ** 2);
-
-    if (distance > Config.minPointDistance) {
-      GameState.windCurve.points.push(newPoint);
+  document.addEventListener("mousemove", (event) => {
+    if (GameState.isDrawingWind) {
+      // Get the fresh canvas position at the moment of the event
+      const rect = canvas.getBoundingClientRect();
+      handleDragMove(event.clientX - rect.left, event.clientY - rect.top);
     }
   });
 
-  document.addEventListener("mouseup", function () {
-    GameState.isDrawingWind = false;
+  document.addEventListener("mouseup", () => {
+    if (GameState.isDrawingWind) {
+      handleDragEnd();
+    }
+  });
+
+  // --- Touch Event Listeners ---
+  canvas.addEventListener(
+    "touchstart",
+    (event) => {
+      event.preventDefault();
+      // Get the fresh canvas position at the moment of the event
+      const rect = canvas.getBoundingClientRect();
+      const touch = event.touches[0];
+      handleDragStart(touch.clientX - rect.left, touch.clientY - rect.top);
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener(
+    "touchmove",
+    (event) => {
+      event.preventDefault();
+      if (GameState.isDrawingWind) {
+        // Get the fresh canvas position at the moment of the event
+        const rect = canvas.getBoundingClientRect();
+        const touch = event.touches[0];
+        handleDragMove(touch.clientX - rect.left, touch.clientY - rect.top);
+      }
+    },
+    { passive: false }
+  );
+
+  // touchend and touchcancel do not need coordinates, so they are fine
+  canvas.addEventListener("touchend", () => {
+    if (GameState.isDrawingWind) {
+      handleDragEnd();
+    }
+  });
+
+  canvas.addEventListener("touchcancel", () => {
+    if (GameState.isDrawingWind) {
+      handleDragEnd();
+    }
   });
 }

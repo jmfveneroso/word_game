@@ -9,9 +9,11 @@ import { Config } from "./Config.js";
 import { canvasWidth, canvasHeight, ctx } from "./ui.js";
 import { handleLifeLoss } from "./game_state.js";
 import { GameState } from "./game_state.js";
+import { degradeBall } from "./mechanics.js";
 
 export class Ball {
   constructor(x, y, actualRadius, initialSymbolId, isBlack) {
+    this.id = Date.now() + Math.random();
     this.x = x;
     this.y = y;
     this.vx = 0;
@@ -20,10 +22,16 @@ export class Ball {
     this.symbolId = initialSymbolId;
     this.level = symbolDefinitions[initialSymbolId].level;
     this.isGrabbed = false;
-    this.isBlack = isBlack;
+    this.isBlack = false;
     this.grabStartX = 0;
     this.grabStartY = 0;
     this.slingshotVector = { x: 0, y: 0 };
+    this.isConstructing = true;
+    this.createdAt = Date.now();
+    this.trail = [];
+    this.windImmuneUntil = 0;
+    this.isDangerous = false;
+    this.isCapturedByWind = false;
   }
 
   drawSlingshot() {
@@ -64,61 +72,149 @@ export class Ball {
     }
   }
 
-  draw() {
+  draw(cfg) {
+    const isInverted = cfg.invertColors;
+
+    if (
+      Config.enableWindSparkles &&
+      this.isCapturedByWind &&
+      Math.random() < 0.3
+    ) {
+      const angle = Math.random() * Math.PI * 2;
+      const sparkRadius = this.radius + 5;
+      const sparkX = this.x + Math.cos(angle) * sparkRadius;
+      const sparkY = this.y + Math.sin(angle) * sparkRadius;
+      ctx.fillStyle = "rgba(255, 255, 220, 0.9)"; // A bright yellow-white
+      ctx.beginPath();
+      ctx.arc(sparkX, sparkY, Math.random() * 2 + 1, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+
+    if (this.isDangerous) {
+      ctx.save();
+      // Use the ball's path to create a blurred shape
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
+      // Apply the "blur" effect using shadows
+      ctx.shadowBlur = cfg.dangerHighlightBlur;
+      ctx.shadowColor = cfg.dangerHighlightColor;
+      // The fill makes the shadow visible; its own color doesn't matter.
+      ctx.fillStyle = cfg.dangerHighlightColor;
+      ctx.fill();
+      ctx.restore(); // Restore context to remove shadow for other drawings
+    }
+
+    const enableBallTrails =
+      cfg.enableBallTrails &&
+      (this.symbolId !== "S1_VOID" || cfg.enableBallTrailsForVoid);
+    if (enableBallTrails && this.trail.length > 0) {
+      for (let i = 0; i < this.trail.length; i++) {
+        const trailPoint = this.trail[i];
+        // progress = 0 for the oldest point, 1 for the newest (closest to the ball)
+        const progress = i / (this.trail.length - 1);
+
+        // Interpolate size and opacity to make the trail grow towards the ball
+        const currentRadius =
+          cfg.ballTrailStartWidth +
+          (cfg.ballTrailEndWidth - cfg.ballTrailStartWidth) * progress;
+        const currentAlpha = cfg.ballTrailOpacity;
+
+        // Use the ball's main fill color for the trail
+        ctx.fillStyle = isInverted
+        ? cfg.symbolColor.inverted
+        : cfg.symbolColor.normal;
+
+        // Set opacity and draw the trail segment
+        ctx.globalAlpha = currentAlpha;
+        ctx.beginPath();
+        ctx.arc(trailPoint.x, trailPoint.y, currentRadius, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      // Reset global alpha so it doesn't affect other drawings
+      ctx.globalAlpha = 1.0;
+    }
+
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
 
     // --- Determine color based on level and isBlack ---
-    let fillColor = Config.levelColorsGray[0]; // Default to L1 gray
-    if (this.level >= 1 && this.level <= Config.levelColorsGray.length) {
-      // Check level is valid index
-      fillColor = this.isBlack
-        ? Config.levelColorsBlack[this.level - 1]
-        : Config.levelColorsGray[this.level - 1];
+    let fillColor;
+    const lightColors = cfg.levelColorsGray;
+
+    if (this.level >= 1) {
+      fillColor = lightColors[this.level - 1] || lightColors[0];
     } else {
-      // Fallback for potentially undefined levels or future levels
-      fillColor = this.isBlack
-        ? Config.levelColorsBlack[0]
-        : Config.levelColorsGray[0];
+      fillColor = lightColors[0];
     }
 
     if (this.symbolId === "S1_VOID") {
-      fillColor = Config.voidSymbolColor;
+      fillColor = isInverted
+        ? cfg.voidSymbolColor.inverted
+        : cfg.voidSymbolColor.normal;
+    } else if (this.symbolId === "S1_LIFE") {
+      fillColor = isInverted
+        ? cfg.lifeSymbolColor.inverted
+        : cfg.lifeSymbolColor.normal;
     }
+
     ctx.fillStyle = fillColor;
-    // -------------------------------------------------
 
-    ctx.fill();
+    if (cfg.strokeColors) {
+      ctx.strokeStyle = fillColor;
+    } else {
+      ctx.strokeStyle = (isInverted && !cfg.enableBallFill) ? cfg.symbolColor.inverted : cfg.symbolColor.normal;
+    }
+
+    if (cfg.enableBallBorder) {
+      ctx.stroke();
+    }
+    if (cfg.enableBallFill) {
+      ctx.fill();
+    }
     ctx.closePath();
-
-    // const symbolDef = symbolDefinitions[this.symbolId];
-    // const symbolChar = symbolDef.character;
-    // const fontSize =
-    //   (this.radius * 1.2) / Math.max(1, symbolChar.length * 0.55);
-    // ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-    // ctx.textAlign = "center";
-    // ctx.textBaseline = "middle";
-    // // Keep symbol text color consistent for contrast
-    // ctx.fillStyle = this.isGrabbed
-    //   ? Config.grabbedBallSymbolColor
-    //   : Config.symbolColor;
-    // ctx.fillText(symbolChar, this.x, this.y);
 
     const mandalaDef = mandalaDefinitions[this.symbolId];
     if (mandalaDef && mandalaDef.mandalaConfig) {
       const config = mandalaDef.mandalaConfig;
-      const mandalaColor = this.isGrabbed
-        ? Config.grabbedBallSymbolColor
-        : Config.symbolColor;
+      let mandalaColor = this.isGrabbed
+        ? (isInverted ? cfg.grabbedBallSymbolColor.inverted : cfg.grabbedBallSymbolColor.normal)
+        : (isInverted && !cfg.enableBallFill) ? cfg.symbolColor.inverted : cfg.symbolColor.normal;
 
-      // Call the drawMandala function with scaled parameters
+      const finalSpikeDistance = config.spikeDistance * this.radius;
+      let currentSpikeDistance = finalSpikeDistance;
+
+      if (this.isConstructing) {
+        const elapsedTime = Date.now() - this.createdAt;
+        const progress = Math.min(
+          1.0,
+          elapsedTime / Config.constructionAnimationDuration
+        );
+
+        // The spike distance grows based on the animation's progress
+        currentSpikeDistance = finalSpikeDistance * progress;
+
+        if (progress >= 1.0) {
+          this.isConstructing = false; // End the animation
+        }
+      }
+
+      if (config.isWildcard && Config.enableWildcardColor) {
+        mandalaColor = "#F1C40F";
+      } else if (this.symbolId === "S1_BLACK_VOID") {
+        mandalaColor = "rgba(255, 0, 100, 0.8)"; // Menacing magenta/red color for the mandala
+      }
+
+      if (cfg.strokeColors) {
+        mandalaColor = fillColor;
+      }
+
       drawMandala(
         ctx,
         this.x,
         this.y,
         config.innerRadius * this.radius, // Scale by ball radius
         config.numPoints,
-        config.spikeDistance * this.radius, // Scale by ball radius
+        currentSpikeDistance,
         config.leafType,
         mandalaColor,
         config.curveAmount * this.radius, // Scale by ball radius
@@ -129,19 +225,17 @@ export class Ball {
     // this.drawSlingshot();
   }
 
-  doBottomCheck() {
+  doBottomCheck(cfg) {
     if (this.y + this.radius > canvasHeight) {
-      if (this.isBlack) {
-        handleLifeLoss(this);
+      if (Config.enableLivesSystem && this.level > Config.minLevelToLoseLife) {
+        handleLifeLoss();
       }
 
       spawnParticles(
         10,
         this.x,
         canvasHeight - 5,
-        this.isBlack
-          ? Config.particleDebrisColor
-          : Config.particleConstructColor,
+        cfg.invertColors ? cfg.particleConstructColor.inverted : cfg.particleConstructColor.normal,
         2,
         1,
         3
@@ -167,10 +261,14 @@ export class Ball {
 
   applyGravity(cfg) {
     if (this.symbolId === "S1_VOID") {
-      this.y += 2.0 * cfg.terminalVelocity;
-    } else { 
-      let multiplier = this.radius / 20.0;
-      this.y += (1 / multiplier) * cfg.terminalVelocity;
+      this.y += cfg.voidSpeedMultiplier * cfg.terminalVelocity;
+    } else if (this.symbolId === "S1_LIFE") {
+      this.y += cfg.lifeSymbolFallSpeedMultiplier * cfg.terminalVelocity;
+    } else {
+      let massFactor = this.radius / cfg.baseBallRadius;
+      const fullMassEffect = 1 / massFactor;
+      massFactor = 1 + (fullMassEffect - 1) * cfg.gravityMassEffect;
+      this.y += massFactor * cfg.terminalVelocity;
     }
   }
 
@@ -179,16 +277,14 @@ export class Ball {
     this.vy *= cfg.friction;
   }
 
-  applyWindForce(cfg) {
-    if (!GameState.windCurve) return;
-    if (this.symbolId === "S1_VOID") return;
-
+  // From wind curve.
+  findClosestPointInWindCurve(cfg) {
     const curvePoints = GameState.windCurve.points;
-    if (curvePoints.length < 2) return;
 
     let closestDist = Infinity;
     let closestPoint = null;
     let curveDirection = { x: 0, y: 0 };
+    let segmentIndex = -1; // NEW: Keep track of which segment is closest
 
     // 1. Find the closest point on the entire wind curve to the ball
     for (let i = 0; i < curvePoints.length - 1; i++) {
@@ -198,10 +294,8 @@ export class Ball {
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
 
-      // If the segment has no length, skip it
       if (dx === 0 && dy === 0) continue;
 
-      // Project the ball's position onto the line segment
       const t =
         ((this.x - p1.x) * dx + (this.y - p1.y) * dy) / (dx * dx + dy * dy);
 
@@ -223,48 +317,73 @@ export class Ball {
         closestPoint = currentClosest;
         const mag = Math.sqrt(dx * dx + dy * dy);
         curveDirection = { x: dx / mag, y: dy / mag };
+        segmentIndex = i; // Store the index of the closest segment
       }
     }
 
+    if (closestDist < cfg.windInfluenceRadius) {
+      return [closestPoint, closestDist, segmentIndex, curveDirection];
+    }
+    return [null, Infinity, -1, curveDirection];
+  }
+
+  applyWindForce(cfg) {
+    if (Date.now() < this.windImmuneUntil) return;
+    if (!GameState.windCurve) return;
+    if (this.symbolId === "S1_VOID") return;
+
+    const curvePoints = GameState.windCurve.points;
+    if (curvePoints.length < 2) return;
+
+    let [closestPoint, closestDist, segmentIndex, curveDirection] =
+      this.findClosestPointInWindCurve(cfg);
+
     // 2. If the closest point is within the influence radius, apply forces
-    // if (closestPoint && closestDist < cfg.windInfluenceRadius) {
-    //   // A. The Normal Force (Coupling) - Pulls the ball TOWARDS the line
-    //   const normalDx = closestPoint.x - this.x;
-    //   const normalDy = closestPoint.y - this.y;
+    if (closestPoint && segmentIndex !== -1) {
+      this.isCapturedByWind = true;
+      GameState.windCapturedBalls.push(this.id);
 
-    //   this.vx += normalDx * cfg.windCouplingStrength;
-    //   this.vy += normalDy * cfg.windCouplingStrength;
+      let massFactor = this.radius / cfg.baseBallRadius;
+      const fullMassEffect = 1 / massFactor;
+      massFactor = 1 + (fullMassEffect - 1) * cfg.gravityMassEffect;
 
-    //   // B. The Tangential Force (Propulsion) - Pushes the ball ALONG the line
-    //   this.vx += curveDirection.x * cfg.windStrength;
-    //   this.vy += curveDirection.y * cfg.windStrength;
-    // }
-    if (closestPoint && closestDist < cfg.windInfluenceRadius) {
-      // A. The Normal Force (Coupling) - Pulls the ball TOWARDS the line's position.
-      // This remains the same.
+      const progress = segmentIndex / (curvePoints.length - 1);
+      const falloff = 1.0 - progress * cfg.windForceFalloff;
+      const strengthMultiplier = Math.max(0, falloff); // Ensure strength doesn't go below zero
+
       const normalDx = closestPoint.x - this.x;
       const normalDy = closestPoint.y - this.y;
-      this.vx += normalDx * cfg.windCouplingStrength;
-      this.vy += normalDy * cfg.windCouplingStrength;
 
-      // B. The Tangential Force (Propulsion) - Guides the ball's SPEED along the line.
-      // This new logic prevents oscillation.
+      let couplingForce = cfg.windCouplingStrength;
 
-      // Calculate the ball's current speed projected onto the curve's direction
+      // If the ball is within the arrival distance, ramp down the force.
+      if (closestDist < cfg.windArrivalDistance) {
+        // This creates a scaling factor from 0 to 1 inside the arrival zone.
+        couplingForce *= closestDist / cfg.windArrivalDistance;
+      }
+
+      // Apply the smoothly ramped coupling force.
+      this.vx += normalDx * couplingForce * strengthMultiplier * massFactor;
+      this.vy += normalDy * couplingForce * strengthMultiplier * massFactor;
+
+      // B. The Tangential Force (Propulsion) - Guides the ball's SPEED along the line
       const speedAlongCurve =
         this.vx * curveDirection.x + this.vy * curveDirection.y;
 
-      // If the ball is slower than the max wind speed, apply a force to speed it up.
       if (speedAlongCurve < cfg.windMaxSpeed) {
         const forceMagnitude =
           (cfg.windMaxSpeed - speedAlongCurve) * cfg.windStrength;
-        this.vx += curveDirection.x * forceMagnitude;
-        this.vy += curveDirection.y * forceMagnitude;
+        // Apply the falloff multiplier to the tangential force
+        this.vx += curveDirection.x * forceMagnitude * strengthMultiplier * massFactor;
+        this.vy += curveDirection.y * forceMagnitude * strengthMultiplier * massFactor;
       }
     }
   }
 
+  // From environmental wind.
   applySidewaysWind(cfg) {
+    if (Date.now() < this.windImmuneUntil) return;
+
     // Void symbols remain immune to the wind
     if (this.symbolId === "S1_VOID") {
       return;
@@ -294,14 +413,39 @@ export class Ball {
   }
 
   doHorizontalBoundaryCheck(cfg) {
-    this.vx *= Config.horizontalFriction;
-    if (this.x - this.radius < 0) {
-      this.x = this.radius;
-      this.vx *= Config.bounceEfficiency;
-    } else if (this.x + this.radius > canvasWidth) {
-      this.x = canvasWidth - this.radius;
-      this.vx *= Config.bounceEfficiency;
+    const collidesLeft = this.x - this.radius < 0;
+    const collidesRight = this.x + this.radius > canvasWidth;
+
+    if (collidesLeft || collidesRight) {
+      if (cfg.enableLivesSystem && this.level > Config.minLevelToLoseLife) {
+        handleLifeLoss();
+      }
+
+      // Only attempt to degrade the ball if the feature is on AND the ball is Level 2 or higher.
+      if (cfg.enableHardDegradation && this.level > 1) {
+        const knockbackSource = {
+          x: collidesLeft ? -this.radius : canvasWidth + this.radius,
+          y: this.y,
+        };
+        const didDegrade = degradeBall(this, knockbackSource);
+
+        return true; // Signal for removal (as it's being replaced).
+      }
+
+      spawnParticles(
+        10,
+        this.x < this.radius ? 5 : canvasWidth - 5,
+        this.y,
+        cfg.invertColors ? cfg.particleConstructColor.inverted : cfg.particleConstructColor.normal,
+        2,
+        1,
+        3
+      );
+
+      return true; // Signal for removal.
     }
+
+    return false;
   }
 
   update(cfg) {
@@ -309,6 +453,12 @@ export class Ball {
     //   this.applyGrab();
     //   // return true;
     // }
+    this.trail.push({ x: this.x, y: this.y });
+
+    // Keep the trail from getting too long by removing the oldest point
+    if (this.trail.length > cfg.ballTrailLength) {
+      this.trail.shift();
+    }
 
     this.applyGravity(cfg);
     this.applyWindForce(cfg);
@@ -319,8 +469,9 @@ export class Ball {
     this.y += this.vy;
     this.x += this.vx;
 
-    if (this.doBottomCheck()) return false;
-    // this.doHorizontalBoundaryCheck(cfg);
+    if (this.doBottomCheck(cfg) || this.doHorizontalBoundaryCheck(cfg)) {
+      return false;
+    }
 
     return true;
   }

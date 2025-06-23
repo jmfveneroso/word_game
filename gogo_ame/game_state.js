@@ -1,10 +1,10 @@
-import { Config } from './config.js'; 
+import { Config } from "./config.js";
 
 export const GameState = {
   particles: [],
   gameOver: false,
-  lives: Config.Initial_Lives,
   score: 0,
+  highestScore: 0,
   balls: [],
   ballCreationTimerId: 0,
   grabbedBall: null,
@@ -18,50 +18,73 @@ export const GameState = {
   animationFrameId: 0,
   totalElapsedTime: 0,
   highestLevelAchieved: 1,
+  isAnimatingHighestLevel: false,
+  highestLevelAnimationStart: 0,
+  lives: Config.initialLives,
+  isLosingLife: false,
+  lifeLossAnimationStart: 0,
+  isAnimatingHighestScore: false,
+  highestScoreAnimationStart: 0,
+  windCapturedBalls: [],
+  isChargingWindCombination: false,
+  windCombinationStartTime: 0,
+  windCombinationSet: [], // Stores the IDs of the balls in the charging combo
 };
 
 function triggerGameOver() {
   if (GameState.gameOver) return;
-  console.log("Game Over! Final Score:", score);
   GameState.gameOver = true;
-  if (ballCreationTimerId) clearInterval(ballCreationTimerId);
-  ballCreationTimerId = null;
-  document.getElementById("finalScore").textContent = score;
+
+  // Stop the ball spawner if it's running
+  if (GameState.ballCreationTimerId) {
+    clearInterval(GameState.ballCreationTimerId);
+    GameState.ballCreationTimerId = null;
+  }
+
+  // Update the final score display on the game over screen
+  document.getElementById("finalScore").textContent = GameState.score;
+
+  // This is the essential line that makes the screen appear
   document.getElementById("gameOverScreen").style.display = "block";
 }
 
-export function handleLifeLoss(ball) {
-  if (GameState.gameOver) return;
-  GameState.lives--;
-  updateUI();
-  if (GameState.lives <= 0) {
-    // triggerGameOver();
-  }
-}
-
 export function updateUI() {
-  // document.getElementById("score").textContent = GameState.score;
-  // document.getElementById("lives").textContent = GameState.lives;
+  document.getElementById("scoreDisplay").textContent =
+    `${GameState.score}`;
+  // document.getElementById("highestScoreDisplay").textContent = `BEST: ${GameState.highestScore}`;
 }
 
-function resetGame() {
-  console.log("Resetting game...");
-  GameState.score = 0;
-  GameState.lives = Config.Initial_Lives;
-  GameState.balls = [];
-  GameState.particles = [];
-  GameState.grabbedBall = null;
-  GameState.gameOver = false;
-  GameState.highestLevelAchieved = 3;
+export function handleLifeLoss(ball) {
+  if (GameState.gameOver || GameState.isLosingLife || !Config.enableLivesSystem)
+    return; // Also check if the system is enabled
+  GameState.lives--;
 
-  updateUI();
-  document.getElementById("gameOverScreen").style.display = "none";
-  if (Phyisics.ballCreationInterval > 0) {
-    if (ballCreationTimerId) clearInterval(ballCreationTimerId);
-    ballCreationTimerId = setInterval(createBall, Phyisics.ballCreationInterval);
+  GameState.isLosingLife = true;
+  GameState.lifeLossAnimationStart = Date.now();
+
+  if (GameState.lives <= 0) {
+    triggerGameOver();
   }
-  lastFrameTime = performance.now();
-  if (animationFrameId) cancelAnimationFrame(animationFrameId);
-  animationFrameId = requestAnimationFrame(gameLoop);
 }
-document.getElementById("restartButton").addEventListener("click", resetGame);
+
+export function resetGameState() {
+  console.log("Resetting game state...");
+
+  GameState.particles = [];
+  GameState.balls = [];
+  GameState.gameOver = false;
+  GameState.score = 0;
+  GameState.highestScore = 0;
+  GameState.isDrawingWind = false;
+  GameState.windCurve = null;
+  GameState.totalElapsedTime = 0;
+  GameState.highestLevelAchieved = 1;
+  GameState.isAnimatingHighestLevel = false;
+  GameState.lives = Config.initialLives;
+  GameState.isLosingLife = false;
+  GameState.isAnimatingHighestScore = false;
+  GameState.windCapturedBalls = [];
+  GameState.isChargingWindCombination = false;
+  GameState.windCombinationStartTime = 0;
+  GameState.windCombinationSet = [];
+}

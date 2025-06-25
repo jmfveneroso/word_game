@@ -29,6 +29,8 @@ export const GameState = {
   isChargingWindCombination: false,
   windCombinationStartTime: 0,
   windCombinationSet: [], // Stores the IDs of the balls in the charging combo
+  isPaused: false,
+  nextSymbolIndex: 0,
 };
 
 function triggerGameOver() {
@@ -46,12 +48,6 @@ function triggerGameOver() {
 
   // This is the essential line that makes the screen appear
   document.getElementById("gameOverScreen").style.display = "block";
-}
-
-export function updateUI() {
-  document.getElementById("scoreDisplay").textContent =
-    `${GameState.score}`;
-  // document.getElementById("highestScoreDisplay").textContent = `BEST: ${GameState.highestScore}`;
 }
 
 export function handleLifeLoss(ball) {
@@ -87,4 +83,6 @@ export function resetGameState() {
   GameState.isChargingWindCombination = false;
   GameState.windCombinationStartTime = 0;
   GameState.windCombinationSet = [];
+  GameState.isPaused = false;
+  GameState.nextSymbolIndex = 0;
 }

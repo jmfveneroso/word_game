@@ -2,6 +2,55 @@ import { Config } from "./config.js";
 import { canvas } from "./ui.js";
 import { GameState } from "./game_state.js";
 
+// A flag to ensure we only try to set up the audio source once
+let isAudioSetup = false;
+
+/**
+ * Creates and starts a silent audio loop to prevent mobile browsers from
+ * throttling the requestAnimationFrame loop. Handles modern autoplay policies.
+ */
+function startSilentAudioLoop() {
+  if (isAudioSetup) return;
+
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+  // If the audio context is in a suspended state, it needs to be resumed after a user gesture
+  if (audioContext.state === "suspended") {
+    audioContext.resume().then(() => {
+      console.log("AudioContext resumed successfully.");
+    });
+  }
+
+  // Create a silent buffer
+  const buffer = audioContext.createBuffer(1, 1, 22050);
+  const source = audioContext.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+  source.connect(audioContext.destination);
+
+  // Start the silent audio loop
+  source.start(0);
+
+  console.log("Silent audio loop started to maintain frame rate.");
+  isAudioSetup = true; // Mark as setup so we don't do it again
+}
+
+// A flag to ensure we only request the lock once
+let isWakeLockActive = false;
+
+async function requestWakeLock() {
+  if (isWakeLockActive || !("wakeLock" in navigator)) return;
+  try {
+    await navigator.wakeLock.request("screen");
+    isWakeLockActive = true;
+    console.log("Screen Wake Lock is active.");
+  } catch (err) {
+    console.error(`${err.name}, ${err.message}`);
+  }
+}
+
+let hasInteracted = false;
+
 // --- Generic Input Handlers ---
 // These functions contain the core logic and are called by both mouse and touch events.
 
@@ -12,6 +61,19 @@ import { GameState } from "./game_state.js";
  */
 function handleDragStart(x, y) {
   if (GameState.gameOver) return;
+
+  startSilentAudioLoop();
+  requestWakeLock();
+  if (!hasInteracted) {
+    const video = document.getElementById("keep-alive-video");
+    if (video) {
+      video.play().catch((e) => {
+        console.error("Video play failed:", e);
+      });
+    }
+    hasInteracted = true;
+    console.log("Keep-alive video started.");
+  }
 
   GameState.isDrawingWind = true;
 

@@ -6,6 +6,26 @@ import { canvasWidth, canvasHeight, canvas, ctx } from "./ui.js";
 import { GameState } from "./game_state.js";
 import { addPlayerEvents } from "./player.js";
 
+export function spawnSpecificBall(symbolId) {
+  if (GameState.gameOver) return;
+
+  const symbolDef = symbolDefinitions[symbolId];
+  if (!symbolDef) {
+    console.error(`Attempted to spawn unknown symbol: ${symbolId}`);
+    return;
+  }
+
+  const sizeMultiplier =
+    1.0 + (symbolDef.level - 1) * Config.sizeIncreasePerLevel;
+  const radius = Math.max(5, Config.baseBallRadius * sizeMultiplier);
+
+  // Spawn at the top-center of the canvas
+  const x = canvasWidth / 2;
+  const y = -radius;
+
+  GameState.balls.push(new Ball(x, y, radius, symbolId, false));
+}
+
 function createBall() {
   if (GameState.gameOver) return;
 
@@ -19,9 +39,13 @@ function createBall() {
   } else if (roll < Config.lifeSymbolSpawnRate + Config.voidSymbolSpawnRate) {
     randomSymbolId = "S1_VOID";
   } else {
-    // 3. Otherwise, pick a random symbol from the list of NORMAL L1 symbols.
-    randomSymbolId =
-      L1_NORMAL_SYMBOLS[Math.floor(Math.random() * L1_NORMAL_SYMBOLS.length)];
+    randomSymbolId = L1_NORMAL_SYMBOLS[GameState.nextSymbolIndex];
+
+    GameState.nextSymbolIndex++;
+
+    if (GameState.nextSymbolIndex >= L1_NORMAL_SYMBOLS.length) {
+      GameState.nextSymbolIndex = 0;
+    }
   }
 
   const symbolDef = symbolDefinitions[randomSymbolId];
@@ -44,14 +68,15 @@ function createBall() {
     }
   } else {
     // This logic for normal symbols remains unchanged.
-    const sizeMultiplier = 1.0 + (symbolDef.level - 1) * Config.sizeIncreasePerLevel;
+    const sizeMultiplier =
+      1.0 + (symbolDef.level - 1) * Config.sizeIncreasePerLevel;
     actualRadius = Config.baseBallRadius * sizeMultiplier;
   }
 
   actualRadius = Math.max(5, actualRadius);
 
   const x = Math.random() * (canvasWidth - actualRadius * 2) + actualRadius;
-  
+
   const y = -actualRadius - Math.random() * 20;
   const isBlack = Math.random() < Config.Initial_Ratio_Black_To_Gray;
   GameState.balls.push(new Ball(x, y, actualRadius, randomSymbolId, isBlack));

@@ -1,8 +1,12 @@
 import { Config } from "./config.js";
-import { mandalaDefinitions } from "./symbols.js";
+import {
+  mandalaDefinitions,
+  symbolDefinitions,
+  recreateSymbols,
+} from "./symbols.js";
 import { GameState } from "./game_state.js";
 import { drawMandala } from "./drawing.js"; // Import the shared function
-import { resetBallCreationTimer } from "./environment.js";
+import { resetBallCreationTimer, spawnSpecificBall } from "./environment.js";
 
 const controlsPanel = document.querySelector(".controls");
 const highestLevelCanvas = document.getElementById("highestLevelCanvas");
@@ -31,6 +35,7 @@ const rangeFactor = 10;
 
 const configurableParams = [
   ["terminalVelocity", 0.1],
+  ["terminalVelocitySymbol", 0.05],
   ["baseBallRadius", 1],
   ["ballCreationInterval", 100],
   ["friction", 0.005],
@@ -51,6 +56,7 @@ const configurableParams = [
   ["ballTrailOpacity", 0.001],
   ["voidBallRadiusMultiplier", 0.1],
   ["enableBallTrails", "toggle"],
+  ["enableCollision", "toggle"],
   ["enableWildcard", "toggle"],
   ["enableDegradation", "toggle"],
   ["enableHardDegradation", "toggle"],
@@ -79,6 +85,16 @@ const configurableParams = [
   ["invertColors", "toggle"],
   ["strokeColors", "toggle"],
   ["gravityMassEffect", 0.5],
+  ["enableZeroGravityMode", "toggle"],
+  ["enableImmunity", "toggle"],
+  ["immunityKnockback", 0.1],
+  ["mandalaInnerRadius", 0.05],
+  ["mandalaCurveAmount", 0.05],
+  ["allMetallic", "toggle"],
+  ["windGravityImmunityDuration", 100],
+  ["glitterParticleRate", 0.05],
+  ["glitterParticleLifetime", 50],
+  ["corruptionParticleBaseCount", 1],
 ];
 
 function drawLeaf(x, y, color) {
@@ -92,7 +108,7 @@ function drawLeaf(x, y, color) {
   // Create a scale factor based on the canvas width.
   // We'll use 800px as a reference width for full-size leaves.
   // The Math.min ensures the leaves don't get overly large on ultra-wide screens.
-  const scaleFactor = Math.min(1.0, canvasWidth / 500);
+  const scaleFactor = Math.min(1.0, canvasWidth / 100);
 
   const leafHeight = baseLeafHeight * scaleFactor;
   // Maintain the leaf's aspect ratio by scaling its width proportionally.
@@ -124,7 +140,7 @@ export function drawLivesDisplay() {
 
   for (let i = 0; i < Config.maxLives; i++) {
     // Position leaves from right to left
-    const x = canvasWidth - 40 - i * 30;
+    const x = canvasWidth - 70 - i * 25;
     const y = 20;
 
     // Determine if the leaf should be green (alive) or black (lost)
@@ -230,8 +246,10 @@ export function drawHighestLevelDisplay() {
       currentSpikeDistance,
       config.leafType,
       displayColor,
+      null,
       config.curveAmount * maxRadius,
-      "lines"
+      "lines",
+      2.5
     );
   }
 
@@ -263,9 +281,17 @@ export function drawHighestLevelDisplay() {
 }
 
 export function updateScoreDisplay() {
-  const scoreEl = document.getElementById("score-display");
+  const scoreEl = document.getElementById("scoreDisplay");
   if (scoreEl) {
-    scoreEl.textContent = `${GameState.score}`;
+    // Check if the special mode is enabled
+    if (Config.enableZeroGravityMode) {
+      // In Zero-G mode, display elapsed time instead of score
+      const seconds = Math.floor(GameState.totalElapsedTime / 1000);
+      scoreEl.textContent = `${seconds}`;
+    } else {
+      // In normal mode, display the score
+      scoreEl.textContent = `${GameState.score}`;
+    }
   }
 }
 
@@ -305,6 +331,29 @@ function handleSliderChange(event) {
   if (valueSpan) {
     valueSpan.textContent = value.toFixed(decimals);
   }
+}
+
+function handleSliderChangeWithSymbolUpdate(event) {
+  const slider = event.target;
+  const paramName = slider.id;
+  const value = parseFloat(slider.value);
+  const decimals = parseInt(slider.dataset.decimals, 10);
+
+  // Update the global Config object
+  Config[paramName] = value;
+
+  // Update the corresponding value display
+  const valueSpan = document.getElementById(`${paramName}Value`);
+  if (valueSpan) {
+    valueSpan.textContent = value.toFixed(decimals);
+  }
+  recreateSymbols();
+
+  const lastElement = controlsPanel.lastElementChild;
+  if (lastElement) {
+    lastElement.remove();
+  }
+  generateSpawnerControls();
 }
 
 function handleCheckboxChange(event) {
@@ -347,6 +396,7 @@ function generateUiControls() {
 
     // Create the container div
     const group = document.createElement("div");
+    group.className = "ctrl-div";
 
     // Create the label
     const label = document.createElement("label");
@@ -386,6 +436,11 @@ function generateUiControls() {
 
       if (name === "ballCreationInterval") {
         slider.addEventListener("input", handleIntervalChange);
+      } else if (
+        name === "mandalaInnerRadius" ||
+        name === "mandalaCurveAmount"
+      ) {
+        slider.addEventListener("input", handleSliderChangeWithSymbolUpdate);
       } else {
         slider.addEventListener("input", handleSliderChange);
       }
@@ -403,8 +458,77 @@ function generateUiControls() {
   });
 }
 
+function generateSpawnerControls() {
+  const spawnerContainer = document.createElement("div");
+  spawnerContainer.className = "spawner-container";
+
+  const spawnerGrid = document.createElement("div");
+  spawnerGrid.className = "spawner-grid";
+
+  // Get all defined, non-special symbols
+  const spawnableSymbols = Object.keys(symbolDefinitions).filter(
+    (id) =>
+      !symbolDefinitions[id].isWildcard &&
+      !id.includes("VOID") &&
+      !id.includes("LIFE")
+  );
+
+  // Sort them by level, then by name
+  spawnableSymbols.sort((a, b) => {
+    const levelA = symbolDefinitions[a].level;
+    const levelB = symbolDefinitions[b].level;
+    if (levelA !== levelB) {
+      return levelA - levelB;
+    }
+    return a.localeCompare(b); // Alphabetical sort within the same level
+  });
+
+  // Create a button with a canvas for each spawnable symbol
+  spawnableSymbols.forEach((symbolId) => {
+    const def = symbolDefinitions[symbolId];
+    const mandalaConfig = mandalaDefinitions[symbolId].mandalaConfig;
+
+    const button = document.createElement("button");
+    button.className = "spawner-btn";
+    button.title = symbolId; // Show the ID on hover
+    button.onclick = () => spawnSpecificBall(symbolId);
+
+    // Create a mini-canvas for the icon
+    const btnCanvas = document.createElement("canvas");
+    const btnCtx = btnCanvas.getContext("2d");
+    const canvasSize = 160; // Internal resolution for the icon
+    btnCanvas.width = canvasSize;
+    btnCanvas.height = canvasSize;
+    const lightColors = Config.levelColorsGray;
+    btnCanvas.style.background = lightColors[def.level - 1];
+
+    // Draw the mandala on the button's canvas
+    const maxRadius = (canvasSize / 2) * 0.8;
+    drawMandala(
+      btnCtx,
+      canvasSize / 2,
+      canvasSize / 2, // Center of the small canvas
+      mandalaConfig.innerRadius * maxRadius,
+      mandalaConfig.numPoints,
+      mandalaConfig.spikeDistance * maxRadius,
+      mandalaConfig.leafType,
+      Config.invertColors ? "#000000" : "#FFFFFF", // Use black/white for clarity
+      null,
+      mandalaConfig.curveAmount * maxRadius,
+      mandalaConfig.fillStyle
+    );
+
+    button.appendChild(btnCanvas);
+    spawnerGrid.appendChild(button);
+  });
+
+  spawnerContainer.appendChild(spawnerGrid);
+  controlsPanel.appendChild(spawnerContainer);
+}
+
 export function addUiEvents() {
   generateUiControls();
+  generateSpawnerControls();
   resizeCanvas();
 
   // Get references to the buttons AFTER they have been created

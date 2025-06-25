@@ -18,7 +18,7 @@ import {
   canvasHeight,
   canvas,
 } from "./ui.js";
-import { GameState, updateUI, resetGameState } from "./game_state.js";
+import { GameState, resetGameState } from "./game_state.js";
 import { addPlayerEvents, addPlayerWindEvents } from "./player.js";
 import { addBallSpawnsEvents, resetBallCreationTimer } from "./environment.js";
 import { drawWindCurve, checkWindCombination } from "./wind.js";
@@ -30,6 +30,35 @@ function updateBalls() {
     if (!ball.update(Config)) {
       GameState.balls.splice(i, 1);
     }
+  }
+}
+
+// --- Create the Pause Text Element ---
+const pauseTextElement = document.createElement("div");
+pauseTextElement.id = "pause-text";
+pauseTextElement.textContent = "PAUSED";
+pauseTextElement.classList.add("hidden");
+document.getElementById("game-container").appendChild(pauseTextElement);
+
+// --- Create the Toggle Pause Function ---
+function togglePause() {
+  GameState.isPaused = !GameState.isPaused;
+  const pauseBtn = document.getElementById('pause-btn');
+
+  if (GameState.isPaused) {
+    // Show the pause text and change button label
+    pauseTextElement.classList.remove("hidden");
+    pauseBtn.innerHTML = '&#x25B6;'; 
+    // Stop the ball spawner
+    clearInterval(GameState.ballCreationTimerId);
+  } else {
+    // Hide the pause text and change button label back
+    pauseTextElement.classList.add("hidden");
+    pauseBtn.innerHTML = '&#x23F8;';
+    // Restart the ball spawner and game loop correctly
+    lastFrameTime = performance.now(); // Prevents a deltaTime jump
+    resetBallCreationTimer(); // Restart ball spawner
+    requestAnimationFrame(gameLoop); // Re-engage the loop
   }
 }
 
@@ -141,7 +170,9 @@ function draw(cfg, deltaTime) {
     }
   }
 
-  canvas.style.backgroundColor = cfg.invertColors ? cfg.backgroundColor.inverted : cfg.backgroundColor.normal;
+  canvas.style.backgroundColor = cfg.invertColors
+    ? cfg.backgroundColor.inverted
+    : cfg.backgroundColor.normal;
 
   // Save the context state and apply the shake translation
   ctx.save();
@@ -194,7 +225,7 @@ function restartGame() {
   resetBallCreationTimer();
 
   // 4. Update the UI to show the reset scores
-  updateUI();
+  updateScoreDisplay();
 
   // 5. Cancel the old animation loop and start a fresh one
   if (GameState.animationFrameId) {
@@ -205,8 +236,13 @@ function restartGame() {
 }
 
 document.getElementById("restartButton").addEventListener("click", restartGame);
+document.getElementById("pause-btn").addEventListener("click", togglePause);
 
 function gameLoop(currentTime) {
+  if (GameState.isPaused) {
+    return;
+  }
+
   const deltaTime = currentTime - lastFrameTime;
   lastFrameTime = currentTime;
 
@@ -233,7 +269,6 @@ function gameLoop(currentTime) {
   updateDangerHighlights(Config);
 
   updateScoreDisplay();
-  updateUI();
 
   spawnParticlesAlongCurve(Config, deltaTime);
 

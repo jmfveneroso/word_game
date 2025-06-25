@@ -30,7 +30,6 @@ function generateSymbolSystem(maxLevel) {
 
     types.forEach((type, index) => {
       const currentId = ids[index];
-      // ... (rest of your symbol and mandala definition logic for regular types) ...
       symbolDefinitions[currentId] = {
         level,
         recipe: null,
@@ -42,9 +41,9 @@ function generateSymbolSystem(maxLevel) {
       mandalaDefinitions[currentId] = {
         mandalaConfig: {
           numPoints: level + 2,
-          innerRadius: 0.0,
+          innerRadius: Config.mandalaInnerRadius,
           spikeDistance: 0.8,
-          curveAmount: 0.35,
+          curveAmount: Config.mandalaCurveAmount,
           leafType: type.leafType,
           fillStyle: type.fillStyle,
         },
@@ -54,7 +53,6 @@ function generateSymbolSystem(maxLevel) {
     const specialIds = wildcards.map((t) => `S${level}${t.name}`);
     wildcards.forEach((type, index) => {
       const currentId = specialIds[index];
-      // ... (rest of your wildcard definition logic) ...
       symbolDefinitions[currentId] = {
         level,
         recipe: null,
@@ -144,14 +142,28 @@ function generateSymbolSystem(maxLevel) {
 }
 
 // --- This export section is now much cleaner and more reliable ---
-const {
+let {
   symbolDefinitions: generatedSymbols,
   mandalaDefinitions: generatedMandalas,
   L1_SYMBOLS: generatedL1,
   L1_NORMAL_SYMBOLS: generatedL1Normal,
 } = generateSymbolSystem(Config.MAX_SYMBOL_LEVEL);
 
-export const symbolDefinitions = generatedSymbols;
-export const mandalaDefinitions = generatedMandalas;
-export const L1_SYMBOLS = generatedL1;
-export const L1_NORMAL_SYMBOLS = generatedL1Normal;
+export let symbolDefinitions = generatedSymbols;
+export let mandalaDefinitions = generatedMandalas;
+export let L1_SYMBOLS = generatedL1;
+export let L1_NORMAL_SYMBOLS = generatedL1Normal;
+
+export function recreateSymbols() {
+  let {
+    symbolDefinitions: generatedSymbols,
+    mandalaDefinitions: generatedMandalas,
+    L1_SYMBOLS: generatedL1,
+    L1_NORMAL_SYMBOLS: generatedL1Normal,
+  } = generateSymbolSystem(Config.MAX_SYMBOL_LEVEL);
+  
+  symbolDefinitions = generatedSymbols;
+  mandalaDefinitions = generatedMandalas;
+  L1_SYMBOLS = generatedL1;
+  L1_NORMAL_SYMBOLS = generatedL1Normal;
+}

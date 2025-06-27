@@ -6,7 +6,7 @@ export const baseConfig = {
   enableCollision: true,
   enableImmunity: true,
   immunityKnockback: 2.5, // The force of the knockback on the L1 ball
-  friction: 0.985,
+  friction: 0.97,
   windBaseLifetime: 0, // How long the curve lasts in ms
   windLifetimePerPixel: 4,
   windInfluenceRadius: 28, // How close a ball must be to the curve to be affected

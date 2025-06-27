@@ -1,4 +1,4 @@
-import { Config } from "./Config.js";
+import { Config } from "./config.js";
 import {
   mandalaDefinitions,
   symbolDefinitions,

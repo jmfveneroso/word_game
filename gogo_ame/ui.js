@@ -5,7 +5,20 @@ import {
   recreateSymbols,
 } from "./symbols.js";
 import { GameState } from "./game_state.js";
-import { drawMandala } from "./drawing.js"; // Import the shared function
+import {
+  drawMandala,
+  drawMandalaBall,
+  createMetallicGradient,
+  adjustColor,
+  getColorFromPalette,
+} from "./drawing.js"; // Import the shared function
+import {
+  spawnParticles,
+  updateAndDrawParticles,
+  spawnParticlesAlongCurve,
+} from "./particles.js";
+import { destroyBall } from "./mechanics.js";
+
 import { resetBallCreationTimer, spawnSpecificBall } from "./environment.js";
 
 const controlsPanel = document.querySelector(".controls");
@@ -16,10 +29,18 @@ export const ctx = canvas.getContext("2d");
 export let canvasWidth = window.innerWidth;
 export let canvasHeight = window.innerHeight;
 
-canvas.width = canvasWidth;
-canvas.height = canvasHeight;
-
 const dpr = window.devicePixelRatio || 1;
+
+// 2. Set the canvas's drawing buffer to the high-resolution size.
+canvas.width = canvasWidth * dpr;
+canvas.height = canvasHeight * dpr;
+
+// 3. Use CSS to scale the canvas element back down to the logical size.
+canvas.style.width = `${canvasWidth}px`;
+canvas.style.height = `${canvasHeight}px`;
+
+// 4. Scale the main drawing context. All drawing operations will now be scaled up.
+ctx.scale(dpr, dpr);
 
 const displayWidth = highestLevelCanvas.width;
 const displayHeight = highestLevelCanvas.height;
@@ -40,13 +61,6 @@ const configurableParams = [
   ["ballCreationInterval", 100],
   ["friction", 0.005],
   ["sidewaysWindStrength", 0.001],
-  ["windInfluenceRadius", 5],
-  ["windCouplingStrength", 0.001],
-  ["windForceFalloff", 0.05],
-  ["windBaseLifetime", 200],
-  ["windLifetimePerPixel", 1],
-  ["windStrength", 0.1],
-  ["windMaxSpeed", 0.1],
   ["windOscillationAmplitude", 0.001],
   ["windOscillationFrequency1", 0.1],
   ["windOscillationFrequency2", 0.2],
@@ -55,6 +69,7 @@ const configurableParams = [
   ["ballTrailEndWidth", 1],
   ["ballTrailOpacity", 0.001],
   ["voidBallRadiusMultiplier", 0.1],
+  ["enablePhantomSymbols", "toggle"],
   ["enableBallTrails", "toggle"],
   ["enableCollision", "toggle"],
   ["enableWildcard", "toggle"],
@@ -79,11 +94,11 @@ const configurableParams = [
   ["sizeIncreasePerLevel", 0.01],
   ["enableWindCombination", "toggle"],
   ["windCombinationChargeTime", 100],
-  ["windArrivalDistance", 5],
   ["enableBallBorder", "toggle"],
   ["enableBallFill", "toggle"],
   ["invertColors", "toggle"],
   ["strokeColors", "toggle"],
+  ["enableLifeLossAnimation", "toggle"],
   ["gravityMassEffect", 0.5],
   ["enableZeroGravityMode", "toggle"],
   ["enableImmunity", "toggle"],
@@ -95,6 +110,37 @@ const configurableParams = [
   ["glitterParticleRate", 0.05],
   ["glitterParticleLifetime", 50],
   ["corruptionParticleBaseCount", 1],
+  ["corruptionPerParticle", 0.2],
+  ["purificationPerParticle", 0.2],
+  ["windParticleSpread", 1],
+  ["windParticleLifetime", 500],
+  ["windParticleSpawnRate", 1],
+  ["windParticleBaseSpeed", 0.5],
+  ["windParticleSpeedVariance", 1.0],
+  ["windParticleTrailLength", 5],
+  ["minPointDistance", 1],
+  ["windInfluenceRadius", 5],
+  ["windCouplingStrength", 0.001],
+  ["windForceFalloff", 0.05],
+  ["windBaseLifetime", 200],
+  ["windLifetimePerPixel", 1],
+  ["windSmoothingFactor", 0.1],
+  ["windMaxSpeed", 0.5],
+  ["windShadowBlur", 5],
+  ["windBaseStrength", 0.05],
+  ["windStrengthPer100px", 0.01],
+  ["couplingSpeedFactor", 0.01],
+  ["windArrivalDistance", 10],
+  ["couplingCurvatureFactor", 10],
+  ["voidTrailStartWidth", 1],
+  ["voidTrailEndWidth", 1],
+  ["voidTrailOpacity", 0.05],
+  ["voidTrailWobbleFrequency", 5],
+  ["voidTrailWobbleAmplitude", 5],
+  ["voidTrailWobbleSpeed", 5],
+  ["enableHorizontalKick", "toggle"],
+  ["voidParticleCount", "toggle"],
+  ["enableLosePoints", "toggle"],
 ];
 
 function drawLeaf(x, y, color) {
@@ -236,21 +282,22 @@ export function drawHighestLevelDisplay() {
       highestLevelCanvas.height
     );
 
-    drawMandala(
-      highestLevelCtx,
-      // Center the drawing in the logical 80x80 space
-      displayWidth / 2,
-      displayHeight / 2,
-      config.innerRadius * maxRadius,
-      config.numPoints,
-      currentSpikeDistance,
-      config.leafType,
-      displayColor,
-      null,
-      config.curveAmount * maxRadius,
-      "lines",
-      2.5
-    );
+    const symbolId = `S${levelToDisplay}_LINES_BOTH`;
+    drawMandalaBall(highestLevelCtx, Config, {
+      x: displayWidth / 2,
+      y: displayHeight / 2,
+      radius: maxRadius,
+      symbolId: symbolId,
+      level: levelToDisplay,
+      mandalaConfig: mandalaDefinitions[symbolId].mandalaConfig,
+      enableBallFill: false,
+      enableBallBorder: false,
+      innerColor: displayColor,
+      isMetallic: false,
+      drawPlate: false,
+      drawEngraving: true,
+      currentSpikeDistance: currentSpikeDistance,
+    });
   }
 
   const highestScoreEl = document.getElementById("scoreDisplay");
@@ -280,18 +327,15 @@ export function drawHighestLevelDisplay() {
   }
 }
 
-export function updateScoreDisplay() {
+export function updateTopUI() {
   const scoreEl = document.getElementById("scoreDisplay");
+  const timerEl = document.getElementById("timerDisplay"); // Get the new timer element
+
   if (scoreEl) {
-    // Check if the special mode is enabled
-    if (Config.enableZeroGravityMode) {
-      // In Zero-G mode, display elapsed time instead of score
-      const seconds = Math.floor(GameState.totalElapsedTime / 1000);
-      scoreEl.textContent = `${seconds}`;
-    } else {
-      // In normal mode, display the score
-      scoreEl.textContent = `${GameState.score}`;
-    }
+    const seconds = Math.floor(GameState.totalElapsedTime / 1000);
+    timerEl.textContent = `${seconds}`;
+    scoreEl.textContent = `${GameState.score}`;
+    if (timerEl) timerEl.style.display = "block"; // Ensure it's visible otherwise
   }
 }
 
@@ -361,6 +405,12 @@ function handleCheckboxChange(event) {
   Config[checkbox.id] = checkbox.checked;
 }
 
+function handleCheckboxChangeWithSymbolUpdate(event) {
+  const checkbox = event.target;
+  Config[checkbox.id] = checkbox.checked;
+  recreateSymbols();
+}
+
 function handleIntervalChange(event) {
   const slider = event.target;
   const value = parseInt(slider.value, 10);
@@ -409,7 +459,15 @@ function generateUiControls() {
       checkbox.type = "checkbox";
       checkbox.id = name;
       checkbox.checked = Config[name];
-      checkbox.addEventListener("change", handleCheckboxChange);
+
+      if (name === "allMetallic") {
+        checkbox.addEventListener(
+          "change",
+          handleCheckboxChangeWithSymbolUpdate
+        );
+      } else {
+        checkbox.addEventListener("change", handleCheckboxChange);
+      }
       group.appendChild(checkbox);
     } else {
       // Create the range slider input
@@ -504,19 +562,18 @@ function generateSpawnerControls() {
 
     // Draw the mandala on the button's canvas
     const maxRadius = (canvasSize / 2) * 0.8;
-    drawMandala(
-      btnCtx,
-      canvasSize / 2,
-      canvasSize / 2, // Center of the small canvas
-      mandalaConfig.innerRadius * maxRadius,
-      mandalaConfig.numPoints,
-      mandalaConfig.spikeDistance * maxRadius,
-      mandalaConfig.leafType,
-      Config.invertColors ? "#000000" : "#FFFFFF", // Use black/white for clarity
-      null,
-      mandalaConfig.curveAmount * maxRadius,
-      mandalaConfig.fillStyle
-    );
+    drawMandala(btnCtx, {
+      centerX: canvasSize / 2,
+      centerY: canvasSize / 2,
+      innerRadius: mandalaConfig.innerRadius * maxRadius,
+      numPoints: mandalaConfig.numPoints,
+      spikeDistance: mandalaConfig.spikeDistance * maxRadius,
+      leafType: mandalaConfig.leafType,
+      shadowColor: Config.invertColors ? "#000000" : "#FFFFFF", // Use black/white for clarity
+      highlightColor: null,
+      curveAmount: mandalaConfig.curveAmount * maxRadius,
+      fillStyle: mandalaConfig.fillStyle,
+    });
 
     button.appendChild(btnCanvas);
     spawnerGrid.appendChild(button);
@@ -527,6 +584,7 @@ function generateSpawnerControls() {
 }
 
 export function addUiEvents() {
+  // Add the button to the bottom of the controls panel
   generateUiControls();
   generateSpawnerControls();
   resizeCanvas();
@@ -534,10 +592,228 @@ export function addUiEvents() {
   // Get references to the buttons AFTER they have been created
   const expandBtn = document.getElementById("expand-controls-btn");
 
+  // Create and add the debug button for the lotus animation
+  const lotusDebugBtn = document.createElement("button");
+  lotusDebugBtn.className = "debug-btn";
+  lotusDebugBtn.textContent = "Play Lotus Animation";
+
+  // Add an event listener to trigger the animation state
+  lotusDebugBtn.addEventListener("click", () => {
+    // Don't do anything if an animation is already playing
+    if (GameState.isLotusAnimationPlaying || GameState.isLosingLife) return;
+
+    console.log("Triggering Lotus Animation for debugging...");
+    GameState.isLotusAnimationPlaying = true;
+    GameState.lotusAnimationStart = Date.now();
+  });
+  controlsPanel.appendChild(lotusDebugBtn);
+
   // Add events to toggle the panel's visibility
   expandBtn.addEventListener("click", () => {
     controlsPanel.classList.toggle("hidden");
   });
 
   window.addEventListener("resize", resizeCanvas);
+}
+
+export function gainPointsInternal(pointsGained, x, y) {
+  GameState.score += pointsGained;
+  GameState.isAnimatingHighestScore = true;
+  GameState.isAnimatingHighestScoreStart = Date.now();
+
+  GameState.particles.push({
+    type: "scorePopup",
+    x: x,
+    y: y - 20,
+    text: `+${pointsGained}`,
+    life: Config.scorePopupLifetime,
+    totalLife: Config.scorePopupLifetime,
+    vy: Config.scorePopupUpwardSpeed, // Negative Y is up
+  });
+
+  const scoreEl = document.getElementById("scoreDisplay");
+  if (scoreEl) {
+    const rect = scoreEl.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    GameState.particles.push({
+      type: "scorePopup",
+      x: centerX,
+      y: centerY + 20,
+      text: `+${pointsGained}`,
+      life: Config.scorePopupLifetime,
+      totalLife: Config.scorePopupLifetime,
+      vy: Config.scorePopupUpwardSpeed, // Negative Y is up
+    });
+  }
+}
+
+export function gainPoints(newBall) {
+  const pointsGained = Math.pow(newBall.level, 2);
+  gainPointsInternal(pointsGained, newBall.x, newBall.y);
+}
+
+export function losePoints(newBall) {
+  let pointsGained = 0;
+  let count = 1;
+  for (let i = newBall.level; i > 1; i--) {
+    pointsGained -= Math.pow(i, 2) * count;
+    count *= 2;
+  }
+
+  GameState.score += pointsGained;
+  GameState.isAnimatingHighestScore = true;
+  GameState.isAnimatingHighestScoreStart = Date.now();
+
+  GameState.particles.push({
+    type: "scorePopup",
+    x: newBall.x,
+    y: newBall.y - 20,
+    text: `${pointsGained}`,
+    life: Config.scorePopupLifetime,
+    totalLife: Config.scorePopupLifetime,
+    vy: Config.scorePopupUpwardSpeed, // Negative Y is up
+  });
+
+  const scoreEl = document.getElementById("scoreDisplay");
+  if (scoreEl) {
+    const rect = scoreEl.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    GameState.particles.push({
+      type: "scorePopup",
+      x: centerX,
+      y: centerY + 20,
+      text: `${pointsGained}`,
+      life: Config.scorePopupLifetime,
+      totalLife: Config.scorePopupLifetime,
+      vy: Config.scorePopupUpwardSpeed, // Negative Y is up
+    });
+  }
+}
+
+export function drawLotusAnimation(cfg) {
+  const elapsed = Date.now() - GameState.lotusAnimationStart;
+  const progress = Math.min(1.0, elapsed / cfg.lotusAnimationDuration);
+
+  const l10Balls = GameState.balls.filter((b) =>
+    GameState.l10Slots.includes(b.id)
+  );
+
+  GameState.balls.forEach((b) => {
+    destroyBall(b, "glory");
+  });
+
+  GameState.balls = [];
+
+  const startAnimationDuration = 0.1;
+
+  // --- Animation Stage 1: Disappearance (first 15% of the animation) ---
+  const disappearProgress = Math.min(1.0, progress / startAnimationDuration);
+  if (progress < 0.7) {
+    // Spawn particles from the L10 balls
+    Config.l10SymbolPositions.forEach((pos) => {
+      if (Math.random() < 0.5) {
+        spawnParticles(
+          0.1 * Math.max(20, progress > 0 ? 0.7 / progress : 1),
+          pos.x * canvasWidth,
+          pos.y * canvasHeight,
+          Config.gloryParticleColor,
+          Config.Debris_Particle_Speed * 0.5,
+          1,
+          2,
+          20000,
+          true,
+          "glory",
+          20
+        );
+      }
+    });
+  }
+
+  const formationStart = 0.05; // When the lotus starts appearing
+  const settleStart = 0.7; // When the lotus stops cycling colors and holds its final form
+  const fadeStart = 0.9; // When the final lotus begins to fade out
+
+  const maxRadius = Math.min(canvasWidth / 2, canvasHeight / 2) * 0.5;
+
+  if (progress > formationStart && progress < fadeStart) {
+    // This block handles the lotus being visible on screen (growing and holding)
+    const formationPhaseDuration = settleStart - formationStart;
+    const formationProgress = Math.min(
+      1.0,
+      (progress - formationStart) / formationPhaseDuration
+    );
+
+    const symbolId = `LOTUS`;
+    const mandalaConfig = mandalaDefinitions[symbolId].mandalaConfig;
+
+    let lotusColor;
+    let innerColor;
+
+    // Check if we are in the "color cycling" or "settled" phase
+    if (progress < settleStart) {
+      // --- STAGE 2: Color Cycling Phase ---
+      const timeOffset = (GameState.totalElapsedTime / 3000) % 1; // 3-second cycle
+      lotusColor = getColorFromPalette(cfg.levelColorsGray, timeOffset % 1);
+      innerColor = getColorFromPalette(
+        cfg.levelColorsGray,
+        (timeOffset + 0.5) % 1
+      );
+    } else {
+      // --- STAGE 3: Settled Phase ---
+      // The lotus has reached its final, stable colors.
+      lotusColor = "rgba(255, 255, 255, 1.0)"; // A brilliant white
+      innerColor = "rgba(220, 220, 255, 1.0)"; // A light silver/blue
+    }
+
+    // Draw the mandala using the determined colors and progress
+    drawMandalaBall(ctx, Config, {
+      x: canvasWidth / 2,
+      y: canvasHeight / 2,
+      radius: maxRadius * formationProgress,
+      symbolId: symbolId,
+      mandalaConfig: mandalaConfig,
+      level: 20,
+      enableBallFill: true,
+      enableBallBorder: false,
+      fillColor: lotusColor,
+      innerColor: innerColor,
+      isMetallic: true,
+      drawPlate: true,
+      drawEngraving: true,
+      currentSpikeDistance: 0.9 * maxRadius * formationProgress,
+    });
+  }
+
+  // --- Animation Stage 3: Disappearance & Reward (75% to 100%) ---
+  if (progress > 0.9) {
+    if (!GameState.gainedPointsForLotus) {
+      GameState.gainedPointsForLotus = true;
+      gainPointsInternal(
+        Config.lotusPointBonus,
+        canvasWidth / 2,
+        canvasHeight / 2
+      );
+    }
+
+    spawnParticles(
+      40,
+      canvasWidth / 2,
+      canvasHeight / 2,
+      Config.gloryParticleColor,
+      Config.Debris_Particle_Speed,
+      1,
+      2,
+      20000,
+      true,
+      "glory", // A new particle type
+      maxRadius
+    );
+  }
+
+  // --- Animation End ---
+  if (progress >= 1.0) {
+    GameState.cleanupAfterLotus = true;
+  }
 }

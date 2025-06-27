@@ -1,9 +1,11 @@
 import { Config } from "./config.js";
 import { symbolDefinitions, L1_SYMBOLS } from "./symbols.js";
+import { drawMandala, createBackgroundPattern } from "./drawing.js";
 import {
   spawnParticles,
   updateAndDrawParticles,
   spawnParticlesAlongCurve,
+  spawnSidewaysWindParticles,
 } from "./particles.js";
 import { Ball } from "./ball.js";
 import { processCollisions, getCombinedSymbolId } from "./physics.js";
@@ -11,17 +13,22 @@ import {
   addUiEvents,
   clearCanvas,
   drawHighestLevelDisplay,
-  updateScoreDisplay,
+  updateTopUI,
   drawLivesDisplay,
   ctx,
   canvasWidth,
   canvasHeight,
   canvas,
+  drawLotusAnimation,
 } from "./ui.js";
-import { GameState, resetGameState } from "./game_state.js";
+import { GameState, resetGameState, triggerGameOver } from "./game_state.js";
 import { addPlayerEvents, addPlayerWindEvents } from "./player.js";
 import { addBallSpawnsEvents, resetBallCreationTimer } from "./environment.js";
 import { drawWindCurve, checkWindCombination } from "./wind.js";
+import { drawCorruptionPool, drawL10Slots, drawPoolMaxHeightLine } from "./effects.js";
+import { destroyBall, degradeBall } from "./mechanics.js";
+
+let backgroundPattern = null;
 
 let lastFrameTime = performance.now();
 function updateBalls() {
@@ -43,18 +50,18 @@ document.getElementById("game-container").appendChild(pauseTextElement);
 // --- Create the Toggle Pause Function ---
 function togglePause() {
   GameState.isPaused = !GameState.isPaused;
-  const pauseBtn = document.getElementById('pause-btn');
+  const pauseBtn = document.getElementById("pause-btn");
 
   if (GameState.isPaused) {
     // Show the pause text and change button label
     pauseTextElement.classList.remove("hidden");
-    pauseBtn.innerHTML = '&#x25B6;'; 
+    pauseBtn.innerHTML = "&#x25B6;";
     // Stop the ball spawner
     clearInterval(GameState.ballCreationTimerId);
   } else {
     // Hide the pause text and change button label back
     pauseTextElement.classList.add("hidden");
-    pauseBtn.innerHTML = '&#x23F8;';
+    pauseBtn.innerHTML = "&#x23F8;";
     // Restart the ball spawner and game loop correctly
     lastFrameTime = performance.now(); // Prevents a deltaTime jump
     resetBallCreationTimer(); // Restart ball spawner
@@ -152,13 +159,50 @@ function drawBalls(cfg) {
   }
 }
 
+function updateCorruptionPool(cfg) {
+  // Smoothly ease the visible level towards the target level
+  if (GameState.corruptionLevel !== GameState.corruptionTargetLevel) {
+    const difference =
+      GameState.corruptionTargetLevel - GameState.corruptionLevel;
+    GameState.corruptionLevel += difference * cfg.poolRiseSpeed;
+  }
+
+  // Calculate the base height of the pool's surface
+  const baseHeight =
+    (GameState.corruptionLevel / cfg.maxCorruptionLevel) *
+    (canvasHeight * cfg.poolMaxHeight);
+
+  // --- Animation and State Update ---
+  if (GameState.isPoolRising) {
+    const elapsed = Date.now() - GameState.lifeLossAnimationStart;
+    const animationDuration = 2000;
+    const progress = Math.min(1.0, elapsed / animationDuration);
+
+    const currentPoolHeight =
+      baseHeight + (canvasHeight - baseHeight) * progress;
+    GameState.corruptionPoolY = canvasHeight - currentPoolHeight;
+
+    if (progress >= 1.0 && !GameState.gameOver) {
+      triggerGameOver();
+    }
+  } else {
+    GameState.corruptionPoolY = canvasHeight - baseHeight;
+  }
+}
+
+function updatePoolShine(cfg) {
+  if (GameState.poolShineIntensity > 0) {
+    GameState.poolShineIntensity -= cfg.poolShineFadeSpeed;
+  }
+}
+
 function draw(cfg, deltaTime) {
   // --- Screen Shake Logic ---
   let shakeX = 0;
   let shakeY = 0;
 
   // Check if the life loss animation is currently active
-  if (GameState.isLosingLife) {
+  if (GameState.isLosingLife && Config.enableLifeLossAnimation) {
     const elapsed = Date.now() - GameState.lifeLossAnimationStart;
     const progress = elapsed / cfg.lifeLossAnimationDuration;
 
@@ -178,23 +222,78 @@ function draw(cfg, deltaTime) {
   ctx.save();
   ctx.translate(shakeX, shakeY);
 
+  // Set the solid background color first
+  ctx.fillStyle = cfg.invertColors
+    ? cfg.backgroundColor.inverted
+    : cfg.backgroundColor.normal;
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+  // Then, draw the repeating pattern on top
+  ctx.fillStyle = backgroundPattern;
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
   // --- Original Drawing Logic ---
-  clearCanvas();
+  // clearCanvas();
+
+  drawL10Slots();
+
+  drawPoolMaxHeightLine(cfg);
+
+  drawCorruptionPool();
+
   updateAndDrawParticles(deltaTime);
-  drawBalls(cfg);
-  drawWindCurve(cfg);
+
+  if (GameState.isLotusAnimationPlaying) {
+    drawLotusAnimation(cfg);
+  } else {
+    drawBalls(cfg);
+    drawWindCurve(cfg);
+  }
+
   drawHighestLevelDisplay();
+
+  if (GameState.isAwaitingLotusAnimation) {
+    // Find the three balls that are locked in the L10 slots
+    const l10Balls = GameState.balls.filter((b) =>
+      GameState.l10Slots.includes(b.id)
+    );
+
+    if (l10Balls.length === 3) {
+      // Style for the energy lines
+      ctx.strokeStyle = "rgba(255, 223, 0, 0.7)"; // Gold color
+      ctx.lineWidth = 3;
+      ctx.shadowColor = "rgba(255, 255, 255, 1)";
+      ctx.shadowBlur = 15;
+
+      // Animate the line dash to make the lines "shimmer"
+      ctx.setLineDash([15, 10]);
+      ctx.lineDashOffset = -(GameState.totalElapsedTime / 50);
+
+      // Draw lines connecting the three balls to form a triangle
+      ctx.beginPath();
+      ctx.moveTo(l10Balls[0].x, l10Balls[0].y);
+      ctx.lineTo(l10Balls[1].x, l10Balls[1].y);
+      ctx.lineTo(l10Balls[2].x, l10Balls[2].y);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Reset dashes and shadows so they don't affect other drawings
+      ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
+    }
+  }
+
   drawLivesDisplay();
 
   // --- Screen Flash Logic ---
   // If the animation is active, draw a fading red overlay
-  if (GameState.isLosingLife) {
+  if (GameState.isLosingLife && Config.enableLifeLossAnimation) {
     const elapsed = Date.now() - GameState.lifeLossAnimationStart;
     const progress = elapsed / cfg.lifeLossAnimationDuration;
 
     if (progress < 1) {
       // The flash is strongest at the start and fades out
-      const currentOpacity = (1 - progress) * 0.6; // Get base opacity from the color string
+      const currentOpacity = (1 - progress) * 0.1; // Get base opacity from the color string
       ctx.fillStyle = cfg.lifeLossFlashColor.replace(
         /[^,]+(?=\))/,
         currentOpacity.toFixed(2)
@@ -213,6 +312,10 @@ addPlayerWindEvents();
 
 addBallSpawnsEvents();
 addUiEvents();
+backgroundPattern = createBackgroundPattern(
+  ctx,
+  Config.backgroundColor.patternColor
+);
 
 function restartGame() {
   // 1. Reset all game data to its initial state
@@ -225,7 +328,7 @@ function restartGame() {
   resetBallCreationTimer();
 
   // 4. Update the UI to show the reset scores
-  updateScoreDisplay();
+  updateTopUI();
 
   // 5. Cancel the old animation loop and start a fresh one
   if (GameState.animationFrameId) {
@@ -248,12 +351,48 @@ function gameLoop(currentTime) {
 
   GameState.totalElapsedTime += deltaTime;
 
+  if (GameState.isAwaitingLotusAnimation) {
+    const elapsed = Date.now() - GameState.awaitLotusStartTime;
+    if (elapsed >= Config.lotusAnimationPreDelay) {
+      // Time is up! Stop waiting and start the main animation.
+      GameState.isAwaitingLotusAnimation = false;
+      GameState.isLotusAnimationPlaying = true;
+      GameState.lotusAnimationStart = Date.now();
+    }
+  }
+
   if (
     GameState.isLosingLife &&
     Date.now() - GameState.lifeLossAnimationStart >
       Config.lifeLossAnimationDuration
   ) {
     GameState.isLosingLife = false;
+  }
+
+  if (GameState.cleanupAfterLotus) {
+    GameState.l10Slots = [null, null, null];
+    const l10Balls = GameState.balls.filter((b) => b.isL10Symbol);
+    l10Balls.forEach((ball) => GameState.ballsToRemoveThisFrame.push(ball));
+    GameState.balls = [];
+
+    // Reset all animation flags
+    GameState.isLotusAnimationPlaying = false;
+    GameState.cleanupAfterLotus = false;
+  }
+
+  if (GameState.isLotusAnimationPlaying) {
+    draw(Config, deltaTime);
+    GameState.animationFrameId = requestAnimationFrame(gameLoop);
+    return;
+  }
+
+  if (
+    GameState.corruptionLevel >= Config.maxCorruptionLevel &&
+    !GameState.isPoolRising
+  ) {
+    GameState.isPoolRising = true;
+    // We can reuse the life loss animation start time for this, as it's a game-ending event
+    GameState.lifeLossAnimationStart = Date.now();
   }
 
   if (GameState.gameOver) {
@@ -266,16 +405,31 @@ function gameLoop(currentTime) {
     ball.isCapturedByWind = false;
   }
 
+  updatePoolShine(Config);
+  updateCorruptionPool(Config);
+
   updateDangerHighlights(Config);
 
-  updateScoreDisplay();
+  updateTopUI();
 
   spawnParticlesAlongCurve(Config, deltaTime);
+
+  // spawnSidewaysWindParticles(Config, deltaTime);
 
   GameState.ballsToRemoveThisFrame = [];
   GameState.ballsToAddNewThisFrame = [];
 
   updateBalls();
+
+  if (GameState.corruptionLevel > 0) {
+    for (const ball of GameState.balls) {
+      // Check if the ball's bottom edge is below the pool's non-wavy surface line
+      if (ball.y + ball.radius > GameState.corruptionPoolY) {
+        // Use the existing destroyBall function for consistent effects
+        destroyBall(ball);
+      }
+    }
+  }
 
   checkWindCombination(Config);
 

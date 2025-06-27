@@ -10,6 +10,9 @@ function generateSymbolSystem(maxLevel) {
   const mandalaDefinitions = {};
   const L1_REGULAR_SYMBOLS = [];
 
+  const innerColors = Config.innerColors;
+  let innerColor = innerColors[0];
+
   const types = [
     { name: "_SOLID_BOTH", fillStyle: "solid", leafType: "both" },
     { name: "_SOLID_LEFT", fillStyle: "solid", leafType: "left" },
@@ -27,6 +30,7 @@ function generateSymbolSystem(maxLevel) {
     if (level === 1) {
       L1_REGULAR_SYMBOLS.push(...ids);
     }
+
 
     types.forEach((type, index) => {
       const currentId = ids[index];
@@ -46,6 +50,8 @@ function generateSymbolSystem(maxLevel) {
           curveAmount: Config.mandalaCurveAmount,
           leafType: type.leafType,
           fillStyle: type.fillStyle,
+          isMetallic: Config.allMetallic || level >= 7,
+          innerColor: innerColors[level - 1] || "rgba(255, 255, 255, 1.0)",
         },
       };
     });
@@ -71,6 +77,7 @@ function generateSymbolSystem(maxLevel) {
           leafType: "both",
           fillStyle: "lines",
           isWildcard: true,
+          innerColor: "rgba(255, 255, 255, 1.0)"
         },
       };
     });
@@ -101,10 +108,12 @@ function generateSymbolSystem(maxLevel) {
     mandalaConfig: {
       numPoints: 12,
       innerRadius: 0.1,
-      spikeDistance: 0.9,
+      spikeDistance: 0.7,
       leafType: "left",
       curveAmount: 0.35,
       fillStyle: "solid",
+      isMetallic: true,
+      innerColor: "rgba(192, 57, 43, 0.9)",
     },
   };
 
@@ -129,8 +138,30 @@ function generateSymbolSystem(maxLevel) {
     },
   };
 
+  const lotusId = "LOTUS";
+  symbolDefinitions[lotusId] = {
+    level: 32,
+    recipe: null,
+    sizeMultiplier: 1.0,
+    eliminationPoints: 0,
+    explosionRadiusUnits: 0,
+    explosionEffectLevels: [],
+    isLife: true,
+  };
+  mandalaDefinitions[lotusId] = {
+    mandalaConfig: {
+      numPoints: 28,
+      innerRadius: 0,
+      spikeDistance: 0.9,
+      leafType: "both",
+      curveAmount: 0.35,
+      fillStyle: "lines",
+      lineWidth: 2.2,
+    },
+  };
+
   // --- Create final, correct export arrays ---
-  const L1_SYMBOLS = [...L1_REGULAR_SYMBOLS, voidId, lifeId];
+  const L1_SYMBOLS = [...L1_REGULAR_SYMBOLS, voidId, lifeId, lotusId];
   const L1_NORMAL_SYMBOLS = [...L1_REGULAR_SYMBOLS]; // L1_NORMAL_SYMBOLS is just the regular types
 
   return {

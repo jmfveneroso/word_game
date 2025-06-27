@@ -1,6 +1,7 @@
 import { Config } from "./config.js";
 import { canvas } from "./ui.js";
 import { GameState } from "./game_state.js";
+import { spawnParticles, updateAndDrawParticles } from "./particles.js";
 
 // A flag to ensure we only try to set up the audio source once
 let isAudioSetup = false;
@@ -83,6 +84,11 @@ function handleDragStart(x, y) {
     createdAt: Date.now(),
     particleSpawnAccumulator: 0,
   };
+
+  for (const ball of GameState.balls) {
+    ball.isCapturedByWind = false;
+    ball.isCapturedByWindTimer = null;
+  }
 }
 
 /**
@@ -93,13 +99,75 @@ function handleDragStart(x, y) {
 function handleDragMove(x, y) {
   if (!GameState.isDrawingWind || !GameState.windCurve) return;
 
-  const lastPoint =
-    GameState.windCurve.points[GameState.windCurve.points.length - 1];
+  const points = GameState.windCurve.points;
+  const lastPoint = points[points.length - 1];
   const distance = Math.sqrt((x - lastPoint.x) ** 2 + (y - lastPoint.y) ** 2);
 
-  // Only add a new point if the mouse/finger has moved a minimum distance
   if (distance > Config.minPointDistance) {
-    GameState.windCurve.points.push({ x, y });
+    const newPoint = { x, y };
+    const lookback = Math.floor(Config.windAngleLookback);
+    // Ensure we have enough points to perform the lookback check
+    if (Config.enableAngleSnapping && points.length > lookback) {
+      // The first point of our vector is now several points back in the array
+      const p1 = points[points.length - lookback];
+      const p2 = points[points.length - 1]; // The last point
+      const p3 = newPoint; // The new potential point
+
+      // The rest of the angle calculation remains the same
+      const v1x = p2.x - p1.x;
+      const v1y = p2.y - p1.y;
+      const v2x = p3.x - p2.x;
+      const v2y = p3.y - p2.y;
+
+      const dotProduct = v1x * v2x + v1y * v2y;
+      const mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
+      const mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+
+      if (mag1 > 0 && mag2 > 0) {
+        const angle = Math.acos(dotProduct / (mag1 * mag2)) * (180 / Math.PI);
+
+        if (angle > Config.maxWindCurveAngle) {
+          spawnParticles(
+            Config.angleSnapParticleCount,
+            p2.x, // Spawn at the corner
+            p2.y,
+            Config.angleSnapParticleColor,
+            Config.angleSnapParticleSpeed,
+            1,
+            2,
+            500, // minSize, maxSize, lifetime
+            true,
+            "corruption_inert",
+          );
+          handleDragEnd(); // Finalize the old curve
+          handleDragStart(x, y); // Immediately start a new one
+          return; // Stop processing this move
+        }
+      }
+    }
+
+    // 1. Add the new, raw point to the end of the curve. This ensures no lag.
+    GameState.windCurve.points.push(newPoint);
+
+    // --- NEW: Path Smoothing Logic ---
+    if (points.length < 3) return; // Need at least 3 points to smooth
+
+    // 2. Iterate backwards over the existing points (excluding the two newest ones).
+    // This loop pulls each point slightly towards the average of its neighbors.
+    for (let i = points.length - 3; i > 0; i--) {
+      const p0 = points[i - 1]; // Previous point
+      const p1 = points[i]; // The point we are smoothing
+      const p2 = points[i + 1]; // Next point
+
+      // Find the average position between the neighbors
+      const avgX = (p0.x + p2.x) / 2;
+      const avgY = (p0.y + p2.y) / 2;
+
+      // Move the current point a fraction of the way towards that average.
+      p1.x += (avgX - p1.x) * Config.windSmoothingFactor;
+      p1.y += (avgY - p1.y) * Config.windSmoothingFactor;
+    }
+    // --- END OF NEW LOGIC ---
   }
 }
 
@@ -117,6 +185,8 @@ function handleDragEnd() {
       const p2 = points[i + 1];
       totalLength += Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
     }
+
+    GameState.windCurve.totalLength = totalLength;
 
     // Calculate the final lifetime based on the length
     const dynamicLifetime = totalLength * Config.windLifetimePerPixel;

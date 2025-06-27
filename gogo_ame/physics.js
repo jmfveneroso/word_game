@@ -3,43 +3,36 @@ import { Ball } from "./ball.js";
 import { symbolDefinitions, L1_SYMBOLS } from "./symbols.js";
 import { Config } from "./config.js";
 import { spawnParticles, spawnHighestLevelParticles } from "./particles.js";
-import { degradeBall } from "./mechanics.js";
+import { destroyBall, degradeBall } from "./mechanics.js";
+import { gainPoints, canvasWidth, canvasHeight } from "./ui.js";
 
+/**
+ * Correctly extracts the level number from a symbol ID.
+ * @param {string} inputString - The symbol ID (e.g., 'S10_SOLID_BOTH').
+ * @returns {number | null} The level number or null if not found.
+ */
 function getLevel(inputString) {
-  const match = inputString.match(/^S(\d+)_/);
-
-  if (match && match[1]) {
-    return parseInt(match[1], 10);
+  const underscoreIndex = inputString.indexOf("_");
+  if (underscoreIndex > 1) {
+    // Get the substring between 'S' and the '_' (e.g., '10')
+    const levelStr = inputString.substring(1, underscoreIndex);
+    return parseInt(levelStr, 10);
   }
-
   return null;
 }
 
+/**
+ * Correctly extracts the type name from a symbol ID.
+ * @param {string} inputString - The symbol ID (e.g., 'S10_SOLID_BOTH').
+ * @returns {string | null} The type name including the underscore (e.g., '_SOLID_BOTH').
+ */
 function getLineType(inputString) {
-  return inputString.slice(2);
-}
-
-export function destroyBall(targetBall) {
-  GameState.ballsToRemoveThisFrame.push(targetBall);
-
-  spawnParticles(
-    Config.Debris_Particle_Count,
-    targetBall.x,
-    targetBall.y,
-    Config.invertColors
-      ? Config.particleDebrisColor.inverted
-      : Config.particleConstructColor.normal,
-    Config.Debris_Particle_Speed,
-    1,
-    4
-  );
-
-  if (
-    Config.enableLivesSystem &&
-    targetBall.level > Config.minLevelToLoseLife
-  ) {
-    handleLifeLoss();
+  const underscoreIndex = inputString.indexOf("_");
+  if (underscoreIndex !== -1) {
+    // Return the substring from the '_' to the end.
+    return inputString.substring(underscoreIndex);
   }
+  return null;
 }
 
 export function getCombinedSymbolId(id1, id2) {
@@ -62,6 +55,7 @@ export function getCombinedSymbolId(id1, id2) {
     }
   }
 
+  let resultId = null;
   for (const symbolId in symbolDefinitions) {
     const def = symbolDefinitions[symbolId];
     if (def.recipe) {
@@ -69,7 +63,8 @@ export function getCombinedSymbolId(id1, id2) {
         (def.recipe[0] === id1 && def.recipe[1] === id2) ||
         (def.recipe[0] === id2 && def.recipe[1] === id1)
       ) {
-        return symbolId;
+        resultId = symbolId;
+        break;
       }
     }
   }
@@ -89,40 +84,22 @@ export function getCombinedSymbolId(id1, id2) {
     return `S${level + 1}${lineType}`;
   }
 
-  return null;
-}
+  if (resultId && getLevel(resultId) === 10) {
+    console.log("inside");
+    const type = getLineType(resultId); // e.g., _SOLID_BOTH
 
-function gainPoints(newBall) {
-  const pointsGained = Math.pow(newBall.level, 2);
-  GameState.score += pointsGained;
-  GameState.isAnimatingHighestScore = true;
-  GameState.isAnimatingHighestScoreStart = Date.now();
-
-  GameState.particles.push({
-    type: "scorePopup",
-    x: newBall.x,
-    y: newBall.y - 20,
-    text: `+${pointsGained}`,
-    life: Config.scorePopupLifetime,
-    totalLife: Config.scorePopupLifetime,
-    vy: Config.scorePopupUpwardSpeed, // Negative Y is up
-  });
-
-  const scoreEl = document.getElementById("scoreDisplay");
-  if (scoreEl) {
-    const rect = scoreEl.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    GameState.particles.push({
-      type: "scorePopup",
-      x: centerX,
-      y: centerY + 20,
-      text: `+${pointsGained}`,
-      life: Config.scorePopupLifetime,
-      totalLife: Config.scorePopupLifetime,
-      vy: Config.scorePopupUpwardSpeed, // Negative Y is up
-    });
+    // Check the specific slot for this type.
+    if (
+      (type === "_SOLID_BOTH" && GameState.l10Slots[0] !== null) ||
+      (type === "_SOLID_LEFT" && GameState.l10Slots[1] !== null) ||
+      (type === "_LINES_BOTH" && GameState.l10Slots[2] !== null)
+    ) {
+      // The slot is full, so the combination is impossible.
+      return null;
+    }
   }
+
+  return resultId;
 }
 
 function createBall(ballA, ballB, combinedSymId) {
@@ -148,7 +125,11 @@ function createBall(ballA, ballB, combinedSymId) {
   const newBall = new Ball(midX, midY, newRadius, combinedSymId, false);
   newBall.vx = newVx;
   newBall.vy = newVy;
-  newBall.gravityImmuneUntil = Date.now() + Config.windGravityImmunityDuration + Config.levitationLevelMultiplier * productDef.level;
+  newBall.gravityImmuneUntil =
+    Date.now() +
+    Config.windGravityImmunityDuration +
+    Config.levitationLevelMultiplier * productDef.level;
+
   return newBall;
 }
 
@@ -165,7 +146,7 @@ function playHighestLevelAnimation(newBall) {
     spawnHighestLevelParticles(centerX, centerY);
   }
 
-  spawnHighestLevelParticles(newBall.x, newBall.y);
+  // spawnHighestLevelParticles(newBall.x, newBall.y);
 }
 
 function combineSymbols(ballA, ballB) {
@@ -184,16 +165,51 @@ function combineSymbols(ballA, ballB) {
 
   const newBall = createBall(ballA, ballB, combinedSymId);
 
+  if (newBall.isL10Symbol) {
+    const type = getLineType(newBall.symbolId);
+    let socketIndex = -1;
+
+    if (type === "_SOLID_BOTH") socketIndex = 0;
+    else if (type === "_SOLID_LEFT") socketIndex = 1;
+    else if (type === "_LINES_BOTH") socketIndex = 2;
+
+    if (socketIndex !== -1) {
+      GameState.l10Slots[socketIndex] = newBall.id;
+      const targetPos = Config.l10SymbolPositions[socketIndex];
+      newBall.targetPosition = {
+        x: canvasWidth * targetPos.x,
+        y: canvasHeight * targetPos.y,
+      };
+    }
+  }
+
   GameState.ballsToRemoveThisFrame.push(ballA, ballB);
   GameState.ballsToAddNewThisFrame.push(newBall);
 
-  if (newBall.level > 2) {
+  if (newBall.level > 1) {
     gainPoints(newBall);
   }
 
   if (newBall.level > GameState.highestLevelAchieved) {
     playHighestLevelAnimation(newBall);
   }
+
+  // const gloryParticleCount =
+  //   Math.pow(2, newBall.level - 1) * Config.gloryParticleBaseCount;
+  const gloryParticleCount =
+    Math.pow(newBall.level, 2) * Config.gloryParticleBaseCount;
+  spawnParticles(
+    gloryParticleCount,
+    newBall.x,
+    newBall.y,
+    Config.gloryParticleColor,
+    Config.Debris_Particle_Speed,
+    1,
+    2,
+    20000,
+    true,
+    "glory" // A new particle type
+  );
 
   // Play construction particle effect.
   spawnParticles(
@@ -247,6 +263,7 @@ function bounce(ballA, ballB) {
   const overlap = ballA.radius + ballB.radius - distance;
   if (overlap > 0) {
     const totalMass = ballA.radius + ballB.radius;
+
     // The amount each ball is pushed is inversely proportional to its mass
     const pushFactor = overlap / totalMass;
 
@@ -325,6 +342,34 @@ function createExplosion(symbolDefA, midX, midY) {
   }
 }
 
+function knockbackOnCollision(voidBall, targetBall, newBall) {
+  let knockbackVx = 0;
+  let knockbackVy = 0;
+
+  // Calculate the vector pointing from the void ball to the target ball.
+  const dx = targetBall.x - voidBall.x;
+  const dy = targetBall.y - voidBall.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  // Normalize the vector (make its length 1) to get a pure direction.
+  // We check if distance > 0 to avoid dividing by zero.
+  if (distance > 0) {
+    const normalizedX = dx / distance;
+    const normalizedY = dy / distance;
+
+    // Apply the knockback force from the config.
+    knockbackVx = normalizedX * Config.degradationKnockback * 5;
+    knockbackVy = normalizedY * Config.degradationKnockback * 5;
+  } else {
+    // Fallback: If they are perfectly overlapped, push the new ball upwards.
+    knockbackVy = -Config.degradationKnockback;
+  }
+
+  // Inherit the parent's velocity AND add the new knockback force.
+  newBall.vx += targetBall.vx + knockbackVx;
+  newBall.vy += targetBall.vy + knockbackVy;
+}
+
 export function collideWithVoid(ballA, ballB) {
   if (
     !(
@@ -339,6 +384,27 @@ export function collideWithVoid(ballA, ballB) {
   const targetBall = ballA.symbolId === "S1_VOID" ? ballB : ballA;
 
   const targetDef = symbolDefinitions[targetBall.symbolId];
+
+  if (targetBall.isMetallic) {
+    knockbackOnCollision(voidBall, targetBall, targetBall);
+    targetBall.windImmuneUntil =
+      Date.now() + Config.degradationWindImmunityDuration;
+    spawnParticles(
+      100, // More particles for a significant event
+      targetBall.x,
+      targetBall.y,
+      Config.metallicShieldBreakColor,
+      10,
+      2,
+      1,
+      2000,
+      true,
+      "corruption_inert",
+      targetBall.radius,
+    );
+    targetBall.isMetallic = false;
+    return true;
+  }
 
   // Check if degradation is enabled AND if the target symbol has a valid recipe.
   if (
@@ -366,49 +432,16 @@ export function collideWithVoid(ballA, ballB) {
       newIsBlack
     );
 
-    // Give it the momentum of the ball it came from.
-    // newBall.vx = targetBall.vx;
-    // newBall.vy = targetBall.vy;
+    knockbackOnCollision(voidBall, targetBall, newBall);
 
     newBall.windImmuneUntil =
       Date.now() + Config.degradationWindImmunityDuration;
-
-    // 2.5 --- KNOCKBACK LOGIC START ---
-    let knockbackVx = 0;
-    let knockbackVy = 0;
-
-    // Calculate the vector pointing from the void ball to the target ball.
-    const dx = targetBall.x - voidBall.x;
-    const dy = targetBall.y - voidBall.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-
-    // Normalize the vector (make its length 1) to get a pure direction.
-    // We check if distance > 0 to avoid dividing by zero.
-    if (distance > 0) {
-      const normalizedX = dx / distance;
-      const normalizedY = dy / distance;
-
-      // Apply the knockback force from the config.
-      knockbackVx = normalizedX * Config.degradationKnockback;
-      knockbackVy = normalizedY * Config.degradationKnockback;
-    } else {
-      // Fallback: If they are perfectly overlapped, push the new ball upwards.
-      knockbackVy = -Config.degradationKnockback;
-    }
-
-    // Inherit the parent's velocity AND add the new knockback force.
-    newBall.vx = targetBall.vx + knockbackVx;
-    newBall.vy = targetBall.vy + knockbackVy;
-    // --- KNOCKBACK LOGIC END ---
 
     // 3. Queue the new ball to be added and the old one to be removed.
     GameState.ballsToAddNewThisFrame.push(newBall);
     GameState.ballsToRemoveThisFrame.push(targetBall); // Only remove the target.
 
-    if (
-      Config.enableLivesSystem &&
-      targetBall.level > Config.minLevelToLoseLife
-    ) {
+    if (targetBall.level > Config.minLevelToLoseLife) {
       handleLifeLoss();
     }
 
@@ -479,24 +512,12 @@ function destroySymbols(ballA, ballB) {
     (ballA.y * ballB.radius + ballB.y * ballA.radius) /
     (ballA.radius + ballB.radius);
 
-  if (Config.enableLivesSystem && ballA.level > Config.minLevelToLoseLife) {
+  if (ballA.level > Config.minLevelToLoseLife) {
     handleLifeLoss();
   }
 
-  GameState.ballsToRemoveThisFrame.push(ballA, ballB);
-  spawnParticles(
-    Config.Construction_Particle_Count,
-    midX,
-    midY,
-    Config.invertColors
-      ? Config.particleConstructColor.inverted
-      : Config.particleConstructColor.normal,
-    Config.Construction_Particle_Speed,
-    1,
-    5,
-    Config.PARTICLE_LIFETIME_MS * 0.8,
-    false
-  );
+  destroyBall(ballA);
+  destroyBall(ballB);
 
   if (Config.enableExplosions) {
     createExplosion(symbolDefA, midX, midY);
@@ -523,11 +544,7 @@ function degradeOnSameSymbolCollision(ballA, ballB) {
     !Config.enableWildcard
   ) {
     const didDegrade = degradeBall(ballA, ballB); // Degrade ball A
-    if (
-      didDegrade &&
-      Config.enableLivesSystem &&
-      ballA.level > Config.minLevelToLoseLife
-    ) {
+    if (didDegrade && ballA.level > Config.minLevelToLoseLife) {
       handleLifeLoss();
     }
     return true;
@@ -535,7 +552,40 @@ function degradeOnSameSymbolCollision(ballA, ballB) {
   return false;
 }
 
+export function collideWithFinalSymbol(ballA, ballB) {
+  const ballA_is_L10 = symbolDefinitions[ballA.symbolId]?.level === 10;
+  const ballB_is_L10 = symbolDefinitions[ballB.symbolId]?.level === 10;
+
+  // --- NEW: Priority 1: L10 Symbol Collision Logic ---
+  if (ballA_is_L10 || ballB_is_L10) {
+    const l10Ball = ballA_is_L10 ? ballA : ballB;
+    const otherBall = ballA_is_L10 ? ballB : ballA;
+
+    if (otherBall.symbolId === "S1_VOID" || otherBall.level == 1) {
+      // The L10 symbol destroys the Void symbol
+      destroyBall(otherBall);
+    } else {
+      // For any other symbol, it acts as an immovable wall
+      // Apply a one-way bounce to the other ball
+      // const dx = otherBall.x - l10Ball.x;
+      // const dy = otherBall.y - l10Ball.y;
+      // const distance = Math.sqrt(dx * dx + dy * dy);
+      // if (distance > 0) {
+      //   otherBall.vx = (dx / distance) * 2.5; // Strong bounce
+      //   otherBall.vy = (dy / distance) * 2.5;
+      // }
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 export function processCollision(ballA, ballB) {
+  if (collideWithFinalSymbol(ballA, ballB)) {
+    return;
+  }
+
   if (collideWithVoid(ballA, ballB)) {
     return;
   }

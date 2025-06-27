@@ -31,9 +31,20 @@ export const GameState = {
   windCombinationSet: [], // Stores the IDs of the balls in the charging combo
   isPaused: false,
   nextSymbolIndex: 0,
+  corruptionLevel: 100,
+  corruptionTargetLevel: 100,
+  poolShineIntensity: 0,
+  isPoolRising: false,
+  corruptionPoolY: Infinity, // The Y-coordinate of the pool's surface. Starts off-screen.
+  l10Slots: [null, null, null], // Will store the ID of the ball in each slot
+  isLotusAnimationPlaying: false,
+  lotusAnimationStart: 0,
+  cleanupAfterLotus: false,
+  gainedPointsForLotus: false,
+  awaitLotusStartTime: 0,
 };
 
-function triggerGameOver() {
+export function triggerGameOver() {
   if (GameState.gameOver) return;
   GameState.gameOver = true;
 
@@ -51,16 +62,19 @@ function triggerGameOver() {
 }
 
 export function handleLifeLoss(ball) {
-  if (GameState.gameOver || GameState.isLosingLife || !Config.enableLivesSystem)
-    return; // Also check if the system is enabled
-  GameState.lives--;
+  if (GameState.gameOver || GameState.isLosingLife) {
+    return;
+  }
+
+  if (Config.enableLivesSystem) {
+    GameState.lives--;
+    if (GameState.lives <= 0) {
+      triggerGameOver();
+    }
+  }
 
   GameState.isLosingLife = true;
   GameState.lifeLossAnimationStart = Date.now();
-
-  if (GameState.lives <= 0) {
-    triggerGameOver();
-  }
 }
 
 export function resetGameState() {
@@ -85,4 +99,15 @@ export function resetGameState() {
   GameState.windCombinationSet = [];
   GameState.isPaused = false;
   GameState.nextSymbolIndex = 0;
+  GameState.corruptionLevel = 0;
+  GameState.corruptionTargetLevel = 0;
+  GameState.poolShineIntensity = 0;
+  GameState.isPoolRising = false;
+  GameState.corruptionPoolY = Infinity;
+  GameState.l10Slots = [null, null, null];
+  GameState.isLotusAnimationPlaying = false;
+  GameState.lotusAnimationStart = 0;
+  GameState.cleanupAfterLotus = false;
+  GameState.gainedPointsForLotus = false;
+  GameState.awaitLotusStartTime = 0;
 }

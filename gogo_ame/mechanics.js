@@ -3,6 +3,8 @@ import { GameState, handleLifeLoss } from "./game_state.js";
 import { symbolDefinitions } from "./symbols.js";
 import { Ball } from "./ball.js";
 import { spawnParticles } from "./particles.js";
+import { canvasWidth, canvasHeight } from "./ui.js";
+import { losePoints } from "./ui.js";
 
 /**
  * Handles the degradation of a ball upon collision.
@@ -48,7 +50,9 @@ export function degradeBall(ballToDegrade, knockbackSource) {
       Config.Construction_Particle_Count,
       ballToDegrade.x,
       ballToDegrade.y,
-      Config.invertColors ? Config.particleConstructColor.inverted : Config.particleConstructColor.normal,
+      Config.invertColors
+        ? Config.particleConstructColor.inverted
+        : Config.particleConstructColor.normal,
       Config.Construction_Particle_Speed,
       1,
       4
@@ -57,16 +61,71 @@ export function degradeBall(ballToDegrade, knockbackSource) {
     return true;
   }
 
-  // If it can't be degraded (e.g., a Level 1 symbol), just spawn debris.
-  spawnParticles(
-    Config.Debris_Particle_Count,
-    ballToDegrade.x,
-    ballToDegrade.y,
-    Config.invertColors ? Config.particleDebrisColor.inverted : Config.particleDebrisColor.normal,
-    Config.Debris_Particle_Speed,
-    1,
-    4
-  );
-  GameState.ballsToRemoveThisFrame.push(ballToDegrade);
+  destroyBall(ballToDegrade);
   return false;
+}
+
+export function destroyBall(ballToDestroy, type) {
+  // Prevent a ball from being destroyed multiple times in one frame
+  if (GameState.ballsToRemoveThisFrame.includes(ballToDestroy)) return;
+
+  // 1. Queue the ball for removal
+  GameState.ballsToRemoveThisFrame.push(ballToDestroy);
+
+  // 2. Handle life loss if the system is enabled
+  if (
+    ballToDestroy.level > Config.minLevelToLoseLife &&
+    !GameState.isPoolRising
+  ) {
+    handleLifeLoss();
+  }
+
+  // 3. Spawn the new corruption particles
+  // const particleCount =
+  //   Math.pow(2, ballToDestroy.level - 1) * Config.corruptionParticleBaseCount;
+
+  let x = ballToDestroy.x;
+  let y = ballToDestroy.y;
+  if (type == "glory") {
+    const gloryParticleCount =
+      Math.pow(ballToDestroy.level, 2) * Config.gloryParticleBaseCount;
+    spawnParticles(
+      gloryParticleCount,
+      ballToDestroy.x,
+      ballToDestroy.y,
+      Config.gloryParticleColor,
+      Config.Debris_Particle_Speed,
+      1,
+      2,
+      20000,
+      true,
+      "glory" // A new particle type
+    );
+  } else {
+    const isVoid = ballToDestroy.symbolId === "S1_VOID";
+
+    let particleCount =
+      Math.pow(ballToDestroy.level, 2) * Config.corruptionParticleBaseCount;
+    if (isVoid) {
+      particleCount = Config.voidParticleCount;
+    }
+
+    spawnParticles(
+      particleCount,
+      ballToDestroy.x,
+      ballToDestroy.y,
+      Config.corruptionParticleColor,
+      Config.Debris_Particle_Speed,
+      1, // minSize
+      2, // maxSize
+      20000, // lifetime
+      true, // outwardBias
+      "corruption",
+      ballToDestroy.radius
+    );
+  }
+
+  if (ballToDestroy.level > 1 && Config.enableLosePoints) {
+    losePoints(ballToDestroy);
+  }
 }

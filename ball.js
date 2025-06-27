@@ -10,7 +10,7 @@ import {
   symbolDefinitions,
   L1_SYMBOLS,
 } from "./symbols.js";
-import { Config } from "./Config.js";
+import { Config } from "./config.js";
 import { canvasWidth, canvasHeight, ctx } from "./ui.js";
 import { GameState } from "./game_state.js";
 import { getPoolSurfaceY } from "./effects.js";
